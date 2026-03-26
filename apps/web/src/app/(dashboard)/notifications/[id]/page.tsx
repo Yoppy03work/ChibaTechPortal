@@ -43,10 +43,18 @@ export default async function NotificationDetailPage({
         <div className="mb-3 flex items-center gap-2">
           <span
             className={`rounded-full px-2 py-0.5 text-xs font-medium text-white ${
-              notification.source === 'cit-portal' ? 'bg-[#1E3A5F]' : 'bg-[#2563EB]'
+              notification.source === 'cit-portal'
+                ? 'bg-[#1E3A5F]'
+                : notification.source === 'attendance'
+                  ? 'bg-emerald-600'
+                  : 'bg-[#2563EB]'
             }`}
           >
-            {notification.source === 'cit-portal' ? 'CIT Portal' : 'manaba'}
+            {notification.source === 'cit-portal'
+              ? 'CIT Portal'
+              : notification.source === 'attendance'
+                ? '出席システム'
+                : 'manaba'}
           </span>
           <span className="text-xs text-gray-400">
             {new Date(notification.publishedAt).toLocaleDateString('ja-JP', {

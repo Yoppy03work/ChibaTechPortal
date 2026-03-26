@@ -26,13 +26,12 @@ export async function diffAndSave(
     where: {
       userId,
       source,
-      // WHY: originalUrlにexternalIdを保存して照合に使用
-      originalUrl: { in: externalIds },
+      externalId: { in: externalIds },
     },
-    select: { originalUrl: true },
+    select: { externalId: true },
   });
 
-  const existingIds = new Set(existing.map((e) => e.originalUrl));
+  const existingIds = new Set(existing.map((e) => e.externalId));
 
   const newItems = scraped.filter((n) => !existingIds.has(n.externalId));
 
@@ -46,7 +45,9 @@ export async function diffAndSave(
       // WHY: 外部HTMLから取得したデータは必ずサニタイズ
       title: sanitizeHtml(n.title),
       body: sanitizeHtml(n.body),
-      originalUrl: n.externalId,
+      // WHY: externalIdは重複判定用、originalUrlは表示用リンク。責務を分離する
+      externalId: n.externalId,
+      originalUrl: n.url,
       publishedAt: n.publishedAt,
       isRead: false,
     })),

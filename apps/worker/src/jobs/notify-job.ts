@@ -51,7 +51,13 @@ export function startNotifyWorker() {
       }
 
       for (const notif of notifications) {
-        const sourceName = notif.source === 'cit-portal' ? 'CIT Portal' : 'manaba';
+        // WHY: sourceを厳密にマッピング。未知のsourceはそのまま表示し、誤った表示を防ぐ
+        const SOURCE_DISPLAY_NAMES: Record<string, string> = {
+          'cit-portal': 'CIT Portal',
+          'manaba': 'manaba',
+          'attendance': '出席システム',
+        };
+        const sourceName = SOURCE_DISPLAY_NAMES[notif.source] ?? notif.source;
 
         // Push通知
         if (settings.pushEnabled !== false) {

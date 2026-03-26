@@ -76,6 +76,8 @@ model Notification {
   id          String   @id @default(uuid())
   userId      String   @map("user_id")
   source      String   // 'cit-portal' | 'manaba'
+  // WHY: externalIdは外部システム上のID（差分検出用）、originalUrlは表示用リンク。責務を分離
+  externalId  String   @map("external_id")
   title       String
   body        String   @db.Text
   originalUrl String?  @map("original_url")
@@ -85,6 +87,7 @@ model Notification {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, source, externalId])
   @@index([userId, isRead])
   @@index([userId, source])
   @@map("notifications")
