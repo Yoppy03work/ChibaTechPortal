@@ -31,7 +31,7 @@ export async function diffAndSave(
     select: { externalId: true },
   });
 
-  const existingIds = new Set(existing.map((e) => e.externalId));
+  const existingIds = new Set(existing.map((e: { externalId: string }) => e.externalId));
 
   const newItems = scraped.filter((n) => !existingIds.has(n.externalId));
 

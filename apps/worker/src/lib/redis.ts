@@ -2,9 +2,13 @@
  * Redis接続（BullMQ用）
  */
 import IORedis from 'ioredis';
+import type { ConnectionOptions } from 'bullmq';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 export const redis = new IORedis(REDIS_URL, {
   maxRetriesPerRequest: null, // WHY: BullMQの要件
 });
+
+// WHY: BullMQが内部にioredisをバンドルしており型が不整合になるため、ConnectionOptionsとして再エクスポート
+export const bullmqConnection = redis as unknown as ConnectionOptions;

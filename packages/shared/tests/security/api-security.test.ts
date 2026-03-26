@@ -182,7 +182,7 @@ describe('認証チェック（ミドルウェア想定）', () => {
   it('保護対象のAPIパスが正しく定義されている', () => {
     expect(AUTH_REQUIRED_PATHS).toContain('/api/notifications');
     expect(AUTH_REQUIRED_PATHS).toContain('/api/attendance');
-    expect(AUTH_REQUIRED_PATHS).toContain('/api/auth/credentials');
+    expect(AUTH_REQUIRED_PATHS).toContain('/api/credentials');
   });
 
   it('認証不要パスに保護対象のエンドポイントが含まれていない', () => {
@@ -192,6 +192,6 @@ describe('認証チェック（ミドルウェア想定）', () => {
   });
 
   it('認証情報更新は認証必須である', () => {
-    expect(AUTH_REQUIRED_PATHS).toContain('/api/auth/credentials');
+    expect(AUTH_REQUIRED_PATHS).toContain('/api/credentials');
   });
 });
