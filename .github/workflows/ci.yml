@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/chibatech_portal_test
+  REDIS_URL: redis://localhost:6379
+  JWT_SECRET: test-jwt-secret-key-at-least-32-characters-long
+  ENCRYPTION_MASTER_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  AUTH_SECRET: test-auth-secret-for-ci
+  NEXTAUTH_URL: http://localhost:3000
+  NODE_ENV: test
+
+jobs:
+  # --- Lint & Type Check ---
+  lint-typecheck:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: npx prisma generate --schema=packages/db/prisma/schema.prisma
+
+      - run: npx turbo lint
+
+      - run: npx turbo type-check
+
+  # --- Unit Tests (Vitest) ---
+  test-unit:
+    name: Unit Tests
+    needs: lint-typecheck
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: chibatech_portal_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: npx prisma generate --schema=packages/db/prisma/schema.prisma
+
+      - run: npx prisma migrate deploy --schema=packages/db/prisma/schema.prisma
+
+      - run: npx turbo test
+
+  # --- E2E Tests (Playwright) ---
+  test-e2e:
+    name: E2E Tests
+    needs: test-unit
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: chibatech_portal_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: npx prisma generate --schema=packages/db/prisma/schema.prisma
+
+      - run: npx prisma migrate deploy --schema=packages/db/prisma/schema.prisma
+
+      # WHY: テストユーザーをDBにシード（E2Eテストのログインに必要）
+      - run: npx tsx packages/db/prisma/seed-test.ts
+
+      - run: npx playwright install chromium --with-deps
+
+      - name: Run E2E tests
+        working-directory: apps/web
+        run: npx playwright test
+        env:
+          CI: "true"
+          E2E_TEST_STUDENT_ID: T00E2E01
+          E2E_TEST_PASSWORD: e2e-test-password-2026
