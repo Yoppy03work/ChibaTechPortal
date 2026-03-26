@@ -5,7 +5,7 @@
  * スクレイピングジョブとは別キューで非同期実行し、通知の遅延がスクレイピングに影響しないようにする。
  */
 import { Worker, Queue } from 'bullmq';
-import { redis } from '../lib/redis';
+import { bullmqConnection } from '../lib/redis';
 import { prisma } from '@chibatech/db';
 import { sendPushToUser } from '../services/push-notification';
 import { sendEmail } from '../services/email-notification';
@@ -14,7 +14,7 @@ import { notificationEmail } from '@chibatech/email-templates';
 export const NOTIFY_QUEUE_NAME = 'notify';
 
 export const notifyQueue = new Queue(NOTIFY_QUEUE_NAME, {
-  connection: redis,
+  connection: bullmqConnection,
 });
 
 interface NotifyJobData {
@@ -104,7 +104,7 @@ export function startNotifyWorker() {
       }
     },
     {
-      connection: redis,
+      connection: bullmqConnection,
       concurrency: 10,
     }
   );

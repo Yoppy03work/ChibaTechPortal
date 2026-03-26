@@ -7,7 +7,7 @@
  * キューにはuserIdとtargetのみ載せ、認証情報はworker側でDB取得・復号する。
  */
 import { Worker, Queue } from 'bullmq';
-import { redis } from '../lib/redis';
+import { bullmqConnection } from '../lib/redis';
 import { prisma } from '@chibatech/db';
 import { createAdapter } from '../scrapers/adapter-factory';
 import { diffAndSave } from '../services/diff-engine';
@@ -20,7 +20,7 @@ import {
 export const SCRAPE_QUEUE_NAME = 'scrape';
 
 export const scrapeQueue = new Queue(SCRAPE_QUEUE_NAME, {
-  connection: redis,
+  connection: bullmqConnection,
 });
 
 interface ScrapeJobData {
@@ -49,7 +49,8 @@ export function startScrapeWorker() {
         select: { [credsField]: true },
       });
 
-      const encryptedCreds = user?.[credsField] as Buffer | null;
+      // WHY: Prismaの動的selectは戻り値の型が広いunionになるため、unknown経由でキャスト
+      const encryptedCreds = (user as Record<string, unknown> | null)?.[credsField] as Buffer | null;
       if (!encryptedCreds) {
         console.warn(`[${target}] No credentials found for user ${userId}, skipping`);
         return;
@@ -88,7 +89,7 @@ export function startScrapeWorker() {
       }
     },
     {
-      connection: redis,
+      connection: bullmqConnection,
       concurrency: 5,
     }
   );

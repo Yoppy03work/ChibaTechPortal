@@ -14,10 +14,13 @@ RUN npm ci
 # --- Web ---
 FROM deps AS web
 COPY . .
+# WHY: anonymous volumeがnode_modulesを上書きするため、entrypointでprisma generateを実行
+ENTRYPOINT ["./docker-entrypoint.sh"]
 EXPOSE 3000
 CMD ["npm", "run", "dev", "--workspace=@chibatech/web"]
 
 # --- Worker ---
 FROM deps AS worker
 COPY . .
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["npm", "run", "dev", "--workspace=@chibatech/worker"]

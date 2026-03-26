@@ -7,7 +7,7 @@
  * キューにはIDと教室情報のみ載せ、認証情報はworker側でDB取得・復号する。
  */
 import { Worker, Queue } from 'bullmq';
-import { redis } from '../lib/redis';
+import { bullmqConnection } from '../lib/redis';
 import { prisma } from '@chibatech/db';
 import { createAttendanceAdapter } from '../scrapers/adapter-factory';
 import { getMasterKey, withDecryptedCredentials } from '@chibatech/shared';
@@ -16,7 +16,7 @@ import { sanitizeExternalText } from '@chibatech/shared';
 export const ATTENDANCE_QUEUE_NAME = 'attendance';
 
 export const attendanceQueue = new Queue(ATTENDANCE_QUEUE_NAME, {
-  connection: redis,
+  connection: bullmqConnection,
 });
 
 interface AttendanceJobData {
@@ -84,7 +84,7 @@ export function startAttendanceWorker() {
       }
     },
     {
-      connection: redis,
+      connection: bullmqConnection,
       concurrency: 3,
     }
   );
