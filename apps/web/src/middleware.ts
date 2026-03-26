@@ -8,10 +8,13 @@ import NextAuth from 'next-auth';
 import { authConfig } from '@/lib/auth.config';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+// WHY: @chibatech/shared のバレルエクスポート経由だと encryption.ts/auth.ts の
+// node:crypto がバンドルされ Edge Runtime で失敗する。
+// セキュリティヘッダーのみ直接パスでインポートする。
 import {
   REQUIRED_SECURITY_HEADERS,
   buildCspHeader,
-} from '@chibatech/shared';
+} from '@chibatech/shared/src/lib/security-headers';
 
 const { auth } = NextAuth(authConfig);
 
