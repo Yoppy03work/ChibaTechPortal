@@ -29,13 +29,17 @@ export const authConfig: NextAuthConfig = {
 
         // WHY: ブルートフォース対策。IP単位 + 学籍番号単位の2重レートリミット（Redisベース）
         // IP単位: 学籍番号を変えながらの総当たりを防止
+        // WHY: IPが取得できない場合はIPベースリミットをスキップ。
+        // 'unknown'共有キーだとプロキシ障害時に全ユーザーがブロックされる運用リスクがある
         const ip = getClientIp(request.headers);
-        const ipRateResult = await rateLimiter.check(
-          `login:ip:${ip}`,
-          RATE_LIMITS.loginPerIp
-        );
-        if (!ipRateResult.allowed) {
-          return null;
+        if (ip) {
+          const ipRateResult = await rateLimiter.check(
+            `login:ip:${ip}`,
+            RATE_LIMITS.loginPerIp
+          );
+          if (!ipRateResult.allowed) {
+            return null;
+          }
         }
 
         // 学籍番号単位: 特定アカウントへの集中攻撃を防止

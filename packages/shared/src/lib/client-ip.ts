@@ -13,25 +13,36 @@
 /**
  * リクエストから信頼できるクライアントIPを抽出する
  *
+ * WHY: nullを返す場合はIPが特定できないことを意味する。
+ * 呼び出し側はnullの場合にIPベースのレートリミットをスキップすべき。
+ * 'unknown'等の共有キーを使うと、プロキシ障害時に全ユーザーが
+ * 同一バケットでレートリミットされログイン不能になる運用リスクがある。
+ *
  * @param headers - リクエストヘッダー（Request.headers or Headers）
- * @returns クライアントIP文字列。取得できない場合は 'unknown'
+ * @returns クライアントIP文字列。取得できない場合は null
  */
-export function getClientIp(headers: Headers): string {
-  const trustedProxyCount = parseInt(
-    process.env.TRUSTED_PROXY_COUNT ?? '1',
-    10
-  );
+export function getClientIp(headers: Headers): string | null {
+  // WHY: 複数のヘッダーをフォールバックで試す（CDN/プロキシ環境に対応）
+  const xRealIp = headers.get('x-real-ip')?.trim();
+  if (xRealIp) {
+    return xRealIp;
+  }
 
   const xForwardedFor = headers.get('x-forwarded-for');
   if (!xForwardedFor) {
-    return 'unknown';
+    return null;
   }
 
   const ips = xForwardedFor.split(',').map((ip) => ip.trim()).filter(Boolean);
 
   if (ips.length === 0) {
-    return 'unknown';
+    return null;
   }
+
+  const trustedProxyCount = parseInt(
+    process.env.TRUSTED_PROXY_COUNT ?? '1',
+    10
+  );
 
   // WHY: 右端からtrustedProxyCount番目がクライアントIP
   // 右端はプロキシ自身、その左がクライアント

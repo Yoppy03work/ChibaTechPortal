@@ -25,8 +25,10 @@ describe('getClientIp', () => {
     }
   });
 
-  it('x-forwarded-forがない場合はunknownを返す', () => {
-    expect(getClientIp(makeHeaders())).toBe('unknown');
+  it('x-forwarded-forがない場合はnullを返す', () => {
+    // WHY: nullにより呼び出し側がIPベースリミットをスキップできる。
+    // 'unknown'だと全ユーザーが共有バケットでレートリミットされる運用リスクがある
+    expect(getClientIp(makeHeaders())).toBeNull();
   });
 
   it('単一IPの場合はそのまま返す（TRUSTED_PROXY_COUNT=0）', () => {
@@ -81,7 +83,14 @@ describe('getClientIp', () => {
     expect(getClientIp(makeHeaders(' 203.0.113.50 , 10.0.0.1 '))).toBe('203.0.113.50');
   });
 
-  it('空文字列の場合はunknownを返す', () => {
-    expect(getClientIp(makeHeaders(''))).toBe('unknown');
+  it('空文字列の場合はnullを返す', () => {
+    expect(getClientIp(makeHeaders(''))).toBeNull();
+  });
+
+  it('x-real-ipヘッダーがある場合はそれを優先する', () => {
+    const h = new Headers();
+    h.set('x-real-ip', '198.51.100.10');
+    h.set('x-forwarded-for', '1.2.3.4, 10.0.0.1');
+    expect(getClientIp(h)).toBe('198.51.100.10');
   });
 });
