@@ -11,7 +11,7 @@ import { hashSync } from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-const TEST_STUDENT_ID = process.env.E2E_TEST_STUDENT_ID || 'T00E2E01';
+const TEST_STUDENT_ID = process.env.E2E_TEST_STUDENT_ID || 'T00E0001';
 const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || 'e2e-test-password-2026';
 const TEST_EMAIL = 'e2e-test@example.com';
 

@@ -130,10 +130,15 @@ jobs:
 
       - run: npx playwright install chromium --with-deps
 
+      # WHY: CI環境ではbuild済みアプリをstartする（playwright.config.tsの設定に合わせる）
+      - name: Build Next.js app
+        working-directory: apps/web
+        run: npx next build
+
       - name: Run E2E tests
         working-directory: apps/web
         run: npx playwright test
         env:
           CI: "true"
-          E2E_TEST_STUDENT_ID: T00E2E01
+          E2E_TEST_STUDENT_ID: T00E0001
           E2E_TEST_PASSWORD: e2e-test-password-2026
