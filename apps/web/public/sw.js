@@ -1,16 +1,33 @@
 /**
  * Service Worker
  *
- * WHY: Push通知受信、App Shellキャッシュ、Runtime Caching（SWR戦略）を担当。
- * Serwistの代わりに手書きSWで必要最小限を実装。
+ * WHY: Push通知受信、App Shellキャッシュを担当。
+ * セキュリティ上、認証済みAPIレスポンスやダッシュボードページはキャッシュしない。
+ * キャッシュ対象は公開ページ（/login, /offline）と静的アセットのみ。
  */
 
-const CACHE_NAME = 'ctp-v1';
+const CACHE_NAME = 'ctp-v2';
+
+/** キャッシュ対象の公開ページ（認証不要） */
 const PRECACHE_URLS = [
-  '/',
   '/login',
   '/offline',
 ];
+
+/**
+ * キャッシュしてはいけないパスのプレフィックス
+ * WHY: 個人データ（お知らせ、時間割、出席ログ等）がブラウザに残り、
+ * ログアウト後や共有端末で再表示されるリスクを防止する
+ */
+const NO_CACHE_PREFIXES = [
+  '/api/',       // 認証済みAPIレスポンス（個人データ）
+  '/dashboard',  // ダッシュボードページ
+];
+
+/** キャッシュ対象外かどうか判定する */
+function shouldNotCache(pathname) {
+  return NO_CACHE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
 
 // --- Install: App Shell をキャッシュ ---
 self.addEventListener('install', (event) => {
@@ -32,36 +49,49 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// --- Fetch: Stale-While-Revalidate 戦略 ---
+// --- Fetch ---
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // API リクエストはネットワーク優先
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(event.request)
-        .then((resp) => {
-          // 成功したらキャッシュを更新
-          const clone = resp.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          return resp;
-        })
-        .catch(() => caches.match(event.request))
-    );
+  // WHY: APIリクエストと認証済みページはキャッシュしない（network-only）
+  if (shouldNotCache(url.pathname)) {
+    event.respondWith(fetch(event.request));
     return;
   }
 
-  // ページ・アセットはキャッシュ優先 + バックグラウンド更新
+  // 静的アセット・公開ページ: キャッシュ優先 + バックグラウンド更新（SWR）
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request).then((resp) => {
-        const clone = resp.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        return resp;
-      });
+      const fetchPromise = fetch(event.request)
+        .then((resp) => {
+          // WHY: 成功レスポンスのみキャッシュ（エラーページをキャッシュしない）
+          if (resp.ok) {
+            const clone = resp.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return resp;
+        })
+        .catch(() => {
+          // オフライン時はキャッシュから返す。キャッシュもなければオフラインページ
+          return cached || caches.match('/offline');
+        });
       return cached || fetchPromise;
     })
   );
+});
+
+// --- メッセージ: ログアウト時のキャッシュクリア ---
+// WHY: ログアウト時にクライアントからpostMessageでキャッシュ全削除を指示する。
+// 共有端末で前ユーザーの個人データがキャッシュに残るのを防止する。
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'CLEAR_CACHE') {
+    event.waitUntil(
+      caches.delete(CACHE_NAME).then(() => {
+        // 公開ページのみ再キャッシュ
+        return caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS));
+      })
+    );
+  }
 });
 
 // --- Push通知受信 ---
@@ -96,13 +126,11 @@ self.addEventListener('notificationclick', (event) => {
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window' }).then((clients) => {
-      // 既に開いているタブがあればフォーカス
       for (const client of clients) {
         if (client.url.includes(url) && 'focus' in client) {
           return client.focus();
         }
       }
-      // なければ新しいタブで開く
       return self.clients.openWindow(url);
     })
   );

@@ -202,7 +202,14 @@ export function SettingsForm() {
 
       {/* ログアウト */}
       <button
-        onClick={() => signOut({ callbackUrl: '/login' })}
+        onClick={async () => {
+          // WHY: ログアウト前にSWキャッシュをクリアし、個人データがブラウザに残らないようにする
+          if ('serviceWorker' in navigator) {
+            const reg = await navigator.serviceWorker.ready;
+            reg.active?.postMessage({ type: 'CLEAR_CACHE' });
+          }
+          signOut({ callbackUrl: '/login' });
+        }}
         className="w-full rounded border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
       >
         ログアウト
