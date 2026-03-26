@@ -1,14 +1,18 @@
 /**
  * Auth.js v5 設定
  *
- * WHY: Credentials Provider でCIT Portal/manaba用の学籍番号+パスワード認証を実装。
- * JWTベースのセッション管理で、アクセストークン15分、Refresh TokenはHttpOnly Cookie。
+ * WHY: Credentials Provider でChibaTechPortalのローカルDB認証（学籍番号+パスワード）を実装。
+ * CIT Portal/manabaの外部認証情報は別途 /api/credentials で暗号化保存する。
+ * JWTベースのセッション管理で、アクセストークンは15分の短寿命。
  */
 import type { NextAuthConfig } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@chibatech/db';
-import { loginSchema } from '@chibatech/shared';
+import { loginSchema, InMemoryRateLimiter, RATE_LIMITS } from '@chibatech/shared';
+
+// WHY: ログイン試行のブルートフォース攻撃を防止
+const loginRateLimiter = new InMemoryRateLimiter();
 
 export const authConfig: NextAuthConfig = {
   providers: [
@@ -18,10 +22,19 @@ export const authConfig: NextAuthConfig = {
         studentId: { label: '学籍番号', type: 'text', placeholder: 'M24G1140' },
         password: { label: 'パスワード', type: 'password' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         // WHY: Zodで入力バリデーションしてからDB照合
         const parsed = loginSchema.safeParse(credentials);
         if (!parsed.success) {
+          return null;
+        }
+
+        // WHY: ブルートフォース対策。学籍番号単位でレートリミット
+        const rateResult = await loginRateLimiter.check(
+          `login:${parsed.data.studentId}`,
+          RATE_LIMITS.login
+        );
+        if (!rateResult.allowed) {
           return null;
         }
 

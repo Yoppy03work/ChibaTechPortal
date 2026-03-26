@@ -38,12 +38,13 @@ export async function POST(request: Request) {
     );
   }
 
-  // WHY: 同一endpointの重複登録を防ぐ（upsert）
+  // WHY: userId+endpointの複合ユニーク制約でupsert。同一endpointの重複登録を防ぐ
   await prisma.pushSubscription.upsert({
     where: {
-      // endpointでユニーク検索するためにDB側にユニーク制約が必要
-      // 暫定: endpointで検索して既存があれば更新
-      id: 'dummy', // upsertのwhereには既存のuniqueフィールドが必要
+      userId_endpoint: {
+        userId: session.user.id,
+        endpoint: parsed.data.endpoint,
+      },
     },
     update: {
       p256dh: parsed.data.keys.p256dh,
@@ -55,16 +56,6 @@ export async function POST(request: Request) {
       p256dh: parsed.data.keys.p256dh,
       auth: parsed.data.keys.auth,
     },
-  }).catch(async () => {
-    // WHY: upsertが失敗する場合はcreateにフォールバック（endpointにunique制約がない場合）
-    await prisma.pushSubscription.create({
-      data: {
-        userId: session.user.id,
-        endpoint: parsed.data.endpoint,
-        p256dh: parsed.data.keys.p256dh,
-        auth: parsed.data.keys.auth,
-      },
-    });
   });
 
   return NextResponse.json({ success: true }, { status: 201 });

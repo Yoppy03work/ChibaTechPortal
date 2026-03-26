@@ -10,6 +10,9 @@ import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { prisma } from '@chibatech/db';
 
+// WHY: 個人データを含むため、Next.jsのキャッシュを無効化
+export const dynamic = 'force-dynamic';
+
 const timetableEntrySchema = z.object({
   dayOfWeek: z.number().int().min(0).max(6),
   period: z.number().int().min(1).max(6),

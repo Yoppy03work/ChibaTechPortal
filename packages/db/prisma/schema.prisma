@@ -44,6 +44,8 @@ model PushSubscription {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // WHY: 同一ユーザー・同一endpointの重複登録を防止
+  @@unique([userId, endpoint])
   @@map("push_subscriptions")
 }
 

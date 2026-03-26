@@ -9,6 +9,9 @@ import { auth } from '@/lib/auth';
 import { prisma } from '@chibatech/db';
 import { notificationSettingsSchema } from '@chibatech/shared';
 
+// WHY: 個人データを含むため、Next.jsのキャッシュを無効化
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {

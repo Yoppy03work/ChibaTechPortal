@@ -24,6 +24,7 @@ export {
   containsSqlInjection,
   containsPathTraversal,
   sanitizeHtml,
+  sanitizeExternalText,
   studentIdSchema,
   registerSchema,
   loginSchema,

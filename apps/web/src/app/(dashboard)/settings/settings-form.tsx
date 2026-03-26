@@ -4,7 +4,8 @@
  * 設定フォーム（Client Component）
  *
  * WHY: 認証情報登録・通知設定・ログアウトのインタラクション。
- * 認証情報はサーバーサイドで暗号化されるため、フォームでは平文を送信しDBには届かない。
+ * 認証情報はフォームから平文で /api/credentials に送信され、サーバー側で
+ * AES-256-GCMで暗号化してからDBに保存される。DBに平文は保存されない。
  */
 import { useState, useEffect } from 'react';
 import { signOut } from 'next-auth/react';

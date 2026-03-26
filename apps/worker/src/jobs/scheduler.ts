@@ -40,6 +40,7 @@ function randomJitter(): number {
 async function enqueueScrapeJobs() {
   if (!isActiveHour()) return;
 
+  // WHY: キューにはuserIdと対象種別のみ載せる。認証情報はworker側でDB取得・復号する
   const users = await prisma.user.findMany({
     where: {
       OR: [
@@ -61,7 +62,6 @@ async function enqueueScrapeJobs() {
       await scrapeQueue.add('cit-portal', {
         userId: user.id,
         target: 'cit-portal' as const,
-        encryptedCreds: user.encryptedCitCreds,
       }, { delay });
     }
 
@@ -69,7 +69,6 @@ async function enqueueScrapeJobs() {
       await scrapeQueue.add('manaba', {
         userId: user.id,
         target: 'manaba' as const,
-        encryptedCreds: user.encryptedManabaCreds,
       }, { delay: delay + 1000 });
     }
   }
@@ -127,12 +126,12 @@ async function enqueueAttendanceJobs() {
       // WHY: roomがnullの場合はスキップ（QR URLを構築できない）
       if (!tt.room) continue;
 
+      // WHY: キューにはIDと教室情報のみ。認証情報はworker側でDB取得する
       await attendanceQueue.add('attend', {
         userId: tt.userId,
         timetableId: tt.id,
         roomId: tt.room,
         className: tt.className,
-        encryptedCreds: tt.user.encryptedCitCreds,
       });
 
       console.log(`[scheduler] Attendance job: ${tt.className} (room ${tt.room}) for user ${tt.userId}`);

@@ -65,7 +65,7 @@ export function containsPathTraversal(input: string): boolean {
 }
 
 /**
- * HTMLタグを除去してサニタイズする
+ * HTMLエンティティにエスケープする
  */
 export function sanitizeHtml(input: string): string {
   return input
@@ -74,6 +74,22 @@ export function sanitizeHtml(input: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#x27;');
+}
+
+/**
+ * 外部由来のテキストからHTMLタグを完全除去し、プレーンテキストとして正規化する
+ * WHY: 外部HTML由来の文字列をDB保存する際に使用。表示側でのXSSリスクを根本的に排除する
+ */
+export function sanitizeExternalText(input: string): string {
+  return input
+    .replace(/<[^>]*>/g, '') // HTMLタグ除去
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .trim();
 }
 
 // --- 安全な文字列バリデータ（Zod refine） ---

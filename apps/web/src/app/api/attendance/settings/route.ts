@@ -9,6 +9,9 @@ import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { prisma } from '@chibatech/db';
 
+// WHY: 個人データを含むため、Next.jsのキャッシュを無効化
+export const dynamic = 'force-dynamic';
+
 const attendanceSettingsSchema = z.object({
   autoAttend: z.boolean(),
 });

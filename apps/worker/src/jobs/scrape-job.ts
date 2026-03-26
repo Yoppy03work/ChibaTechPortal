@@ -4,9 +4,11 @@
  * WHY: BullMQのリピートジョブとして15分間隔で実行。
  * 各ユーザーのCIT Portal/manabaから最新お知らせを取得し、
  * 差分検出→DB保存→通知送信を行う。
+ * キューにはuserIdとtargetのみ載せ、認証情報はworker側でDB取得・復号する。
  */
 import { Worker, Queue } from 'bullmq';
 import { redis } from '../lib/redis';
+import { prisma } from '@chibatech/db';
 import { createAdapter } from '../scrapers/adapter-factory';
 import { diffAndSave } from '../services/diff-engine';
 import {
@@ -24,20 +26,32 @@ export const scrapeQueue = new Queue(SCRAPE_QUEUE_NAME, {
 interface ScrapeJobData {
   userId: string;
   target: 'cit-portal' | 'manaba';
-  encryptedCreds: Buffer;
 }
 
 export function startScrapeWorker() {
   const worker = new Worker<ScrapeJobData>(
     SCRAPE_QUEUE_NAME,
     async (job) => {
-      const { userId, target, encryptedCreds } = job.data;
+      const { userId, target } = job.data;
       const adapter = createAdapter(target);
 
       // WHY: ヘルスチェックで外部システムの稼働を確認してからログインする
       const healthy = await adapter.healthCheck();
       if (!healthy) {
         console.warn(`[${target}] System is down, skipping scrape for user ${userId}`);
+        return;
+      }
+
+      // WHY: 認証情報はキューに載せず、worker側でDBから都度取得・復号する
+      const credsField = target === 'cit-portal' ? 'encryptedCitCreds' : 'encryptedManabaCreds';
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { [credsField]: true },
+      });
+
+      const encryptedCreds = user?.[credsField] as Buffer | null;
+      if (!encryptedCreds) {
+        console.warn(`[${target}] No credentials found for user ${userId}, skipping`);
         return;
       }
 

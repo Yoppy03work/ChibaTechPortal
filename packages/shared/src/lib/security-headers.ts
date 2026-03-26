@@ -45,14 +45,15 @@ export const AUTH_REQUIRED_PATHS: string[] = [
   '/api/attendance',
   '/api/settings',
   '/api/push/subscribe',
-  '/api/auth/credentials',
+  '/api/credentials',
+  '/api/assignments',
+  '/api/syllabus',
 ];
 
 /** 認証不要のパス */
 export const AUTH_NOT_REQUIRED_PATHS: string[] = [
   '/api/auth/register',
-  '/api/auth/login',
-  '/api/auth/refresh',
+  '/api/auth',
   '/login',
   '/register',
 ];
