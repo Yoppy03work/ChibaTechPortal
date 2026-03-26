@@ -29,6 +29,7 @@ export {
   containsPathTraversal,
   sanitizeHtml,
   sanitizeExternalText,
+  sanitizeRichHtml,
   studentIdSchema,
   registerSchema,
   loginSchema,
@@ -68,6 +69,7 @@ export {
   REQUIRED_CSP_DIRECTIVES,
   buildCspHeader,
   ALLOWED_ORIGINS,
+  isOriginAllowed,
   AUTH_REQUIRED_PATHS,
   AUTH_NOT_REQUIRED_PATHS,
 } from './lib/security-headers';

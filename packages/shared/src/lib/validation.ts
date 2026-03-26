@@ -78,18 +78,24 @@ export function sanitizeHtml(input: string): string {
 
 /**
  * 外部由来のテキストからHTMLタグを完全除去し、プレーンテキストとして正規化する
- * WHY: 外部HTML由来の文字列をDB保存する際に使用。表示側でのXSSリスクを根本的に排除する
+ * WHY: 正規表現ベースではネストタグ・不正形式HTML・エンティティ混在に脆弱。
+ * DOMPurifyはDOM解析ベースで全てのXSSベクターに対応する業界標準ライブラリ。
  */
+import DOMPurify from 'isomorphic-dompurify';
+
 export function sanitizeExternalText(input: string): string {
-  return input
-    .replace(/<[^>]*>/g, '') // HTMLタグ除去
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .trim();
+  return DOMPurify.sanitize(input, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }).trim();
+}
+
+/**
+ * リッチHTMLを保持したままサニタイズする（表示用）
+ * WHY: お知らせ本文等でHTMLフォーマットを維持しつつXSSを防止する
+ */
+export function sanitizeRichHtml(input: string): string {
+  return DOMPurify.sanitize(input, {
+    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'table', 'tr', 'td', 'th', 'thead', 'tbody'],
+    ALLOWED_ATTR: ['href', 'target', 'rel'],
+  });
 }
 
 // --- 安全な文字列バリデータ（Zod refine） ---

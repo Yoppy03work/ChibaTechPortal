@@ -54,10 +54,33 @@ export function buildCspHeader(nonce?: string): string {
   return directives.join('; ');
 }
 
-/** 許可するオリジン */
+/** 許可するオリジン（環境変数で追加可能） */
 export const ALLOWED_ORIGINS: string[] = [
   'https://chibatech-portal.example.com', // 本番
+  ...(typeof process !== 'undefined' && process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+    : []),
 ];
+
+/**
+ * Originが許可されているかチェックする
+ * WHY: CORS制御でOriginヘッダーを検証し、許可外オリジンからのAPIリクエストを拒否する
+ *
+ * @param origin - Originヘッダーの値。nullはsame-originリクエスト（許可）
+ */
+export function isOriginAllowed(origin: string | null): boolean {
+  // WHY: same-originリクエスト（Originヘッダーなし = null）は常に許可
+  // 空文字列はOriginが明示的に空で送られたケース → 拒否
+  if (origin === null) return true;
+  if (!origin) return false;
+
+  // WHY: 開発環境ではlocalhostを許可
+  if (typeof process !== 'undefined' && process.env.NODE_ENV === 'development') {
+    if (origin.startsWith('http://localhost:')) return true;
+  }
+
+  return ALLOWED_ORIGINS.includes(origin);
+}
 
 /** 認証が必要なAPIパス */
 export const AUTH_REQUIRED_PATHS: string[] = [
