@@ -147,19 +147,29 @@ export const credentialSchema = z.object({
   manabaPassword: z.string().min(1).max(256).optional(),
 });
 
+/**
+ * HH:MM形式の時刻文字列スキーマ（00:00〜23:59）
+ * WHY: \d{2}:\d{2}だけでは25:00等の意味的に不正な値を通してしまい、
+ * workerのquiet hours判定が壊れる
+ */
+const timeStringSchema = z
+  .string()
+  .regex(/^\d{2}:\d{2}$/, 'Must be HH:MM format')
+  .refine(
+    (val) => {
+      const [h, m] = val.split(':').map(Number);
+      return h >= 0 && h <= 23 && m >= 0 && m <= 59;
+    },
+    { message: 'Time must be between 00:00 and 23:59' }
+  );
+
 /** 通知設定スキーマ */
 export const notificationSettingsSchema = z.object({
   pushEnabled: z.boolean(),
   emailEnabled: z.boolean(),
   sources: z.array(z.enum(['cit-portal', 'manaba'])),
-  quietHoursStart: z
-    .string()
-    .regex(/^\d{2}:\d{2}$/, 'Must be HH:MM format')
-    .optional(),
-  quietHoursEnd: z
-    .string()
-    .regex(/^\d{2}:\d{2}$/, 'Must be HH:MM format')
-    .optional(),
+  quietHoursStart: timeStringSchema.optional(),
+  quietHoursEnd: timeStringSchema.optional(),
   email: z.string().email().max(254).optional(),
 });
 

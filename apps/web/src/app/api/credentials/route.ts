@@ -14,17 +14,14 @@ import {
   credentialSchema,
   createEncryptionService,
   getMasterKey,
-  InMemoryRateLimiter,
   RATE_LIMITS,
 } from '@chibatech/shared';
+import { rateLimiter } from '@/lib/rate-limiter';
 
 // WHY: 認証情報に関わるため、キャッシュ方針を統一
 export const dynamic = 'force-dynamic';
 
 const encryptionService = createEncryptionService();
-
-// WHY: 認証情報更新の乱用を防止（1時間に3回まで）
-const rateLimiter = new InMemoryRateLimiter();
 
 export async function PUT(request: Request) {
   const session = await auth();

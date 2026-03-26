@@ -253,17 +253,32 @@ describe('通知設定バリデーション', () => {
   it('不正な時刻フォーマットを拒否する', () => {
     const result = notificationSettingsSchema.safeParse({
       ...validSettings,
-      quietHoursStart: '25:00', // regex allows but semantically invalid - tests the format
-    });
-    // フォーマットは HH:MM なので25:00はregexでは通る
-    // ここではフォーマットチェックのみ（意味的なチェックは別途）
-    expect(result.success).toBe(true); // regex ^\\d{2}:\\d{2}$ は通る
-
-    const result2 = notificationSettingsSchema.safeParse({
-      ...validSettings,
       quietHoursStart: '10pm',
     });
-    expect(result2.success).toBe(false);
+    expect(result.success).toBe(false);
+  });
+
+  it('意味的に不正な時刻（25:00等）を拒否する', () => {
+    // WHY: HH:MM形式でも00:00〜23:59の範囲外は不正
+    const cases = ['25:00', '24:00', '23:60', '99:99'];
+    for (const time of cases) {
+      const result = notificationSettingsSchema.safeParse({
+        ...validSettings,
+        quietHoursStart: time,
+      });
+      expect(result.success).toBe(false);
+    }
+  });
+
+  it('境界値の時刻を正しく処理する', () => {
+    // 有効な境界値
+    for (const time of ['00:00', '23:59', '12:30']) {
+      const result = notificationSettingsSchema.safeParse({
+        ...validSettings,
+        quietHoursStart: time,
+      });
+      expect(result.success).toBe(true);
+    }
   });
 
   it('不正なソースを拒否する', () => {

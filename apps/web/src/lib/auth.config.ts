@@ -9,10 +9,8 @@ import type { NextAuthConfig } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@chibatech/db';
-import { loginSchema, InMemoryRateLimiter, RATE_LIMITS } from '@chibatech/shared';
-
-// WHY: ログイン試行のブルートフォース攻撃を防止
-const loginRateLimiter = new InMemoryRateLimiter();
+import { loginSchema, RATE_LIMITS, getClientIp } from '@chibatech/shared';
+import { rateLimiter } from './rate-limiter';
 
 export const authConfig: NextAuthConfig = {
   providers: [
@@ -29,12 +27,23 @@ export const authConfig: NextAuthConfig = {
           return null;
         }
 
-        // WHY: ブルートフォース対策。学籍番号単位でレートリミット
-        const rateResult = await loginRateLimiter.check(
-          `login:${parsed.data.studentId}`,
+        // WHY: ブルートフォース対策。IP単位 + 学籍番号単位の2重レートリミット（Redisベース）
+        // IP単位: 学籍番号を変えながらの総当たりを防止
+        const ip = getClientIp(request.headers);
+        const ipRateResult = await rateLimiter.check(
+          `login:ip:${ip}`,
+          RATE_LIMITS.loginPerIp
+        );
+        if (!ipRateResult.allowed) {
+          return null;
+        }
+
+        // 学籍番号単位: 特定アカウントへの集中攻撃を防止
+        const sidRateResult = await rateLimiter.check(
+          `login:sid:${parsed.data.studentId}`,
           RATE_LIMITS.login
         );
-        if (!rateResult.allowed) {
+        if (!sidRateResult.allowed) {
           return null;
         }
 

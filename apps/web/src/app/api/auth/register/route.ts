@@ -6,7 +6,8 @@
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@chibatech/db';
-import { registerSchema, InMemoryRateLimiter, RATE_LIMITS } from '@chibatech/shared';
+import { registerSchema, RATE_LIMITS, getClientIp } from '@chibatech/shared';
+import { rateLimiter } from '@/lib/rate-limiter';
 
 // WHY: bcryptのコストファクターは12が推奨（10は最低ライン）
 // WHY: 認証に関わるため、キャッシュ方針を統一
@@ -14,12 +15,9 @@ export const dynamic = 'force-dynamic';
 
 const BCRYPT_ROUNDS = 12;
 
-// WHY: 登録APIへの総当たり・列挙攻撃を防止
-const rateLimiter = new InMemoryRateLimiter();
-
 export async function POST(request: Request) {
-  // レートリミット: IPベース
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+  // WHY: 信頼できるプロキシチェーンからクライアントIPを抽出（偽装耐性あり）
+  const ip = getClientIp(request.headers);
   const rateResult = await rateLimiter.check(`register:${ip}`, RATE_LIMITS.login);
   if (!rateResult.allowed) {
     return NextResponse.json(
