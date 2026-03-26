@@ -40,9 +40,10 @@ export function startNotifyWorker() {
       const settings = (user?.notificationSettings as {
         pushEnabled?: boolean;
         emailEnabled?: boolean;
+        sources?: string[];
         quietHoursStart?: string;
         quietHoursEnd?: string;
-      } | null) ?? { pushEnabled: true, emailEnabled: true };
+      } | null) ?? { pushEnabled: true, emailEnabled: true, sources: ['cit-portal', 'manaba'] };
 
       // WHY: おやすみモード中は通知を抑制
       if (isQuietHours(settings.quietHoursStart, settings.quietHoursEnd)) {
@@ -50,7 +51,14 @@ export function startNotifyWorker() {
         return;
       }
 
+      // WHY: ユーザーが通知元を絞っている場合、対象外のsourceはスキップ
+      const allowedSources = settings.sources ?? ['cit-portal', 'manaba'];
+
       for (const notif of notifications) {
+        if (!allowedSources.includes(notif.source) && notif.source !== 'attendance') {
+          console.log(`[notify] User ${userId}: source "${notif.source}" not in allowed sources, skipping`);
+          continue;
+        }
         // WHY: sourceを厳密にマッピング。未知のsourceはそのまま表示し、誤った表示を防ぐ
         const SOURCE_DISPLAY_NAMES: Record<string, string> = {
           'cit-portal': 'CIT Portal',

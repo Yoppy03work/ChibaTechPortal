@@ -9,6 +9,9 @@ import { prisma } from '@chibatech/db';
 import { registerSchema, InMemoryRateLimiter, RATE_LIMITS } from '@chibatech/shared';
 
 // WHY: bcryptのコストファクターは12が推奨（10は最低ライン）
+// WHY: 認証に関わるため、キャッシュ方針を統一
+export const dynamic = 'force-dynamic';
+
 const BCRYPT_ROUNDS = 12;
 
 // WHY: 登録APIへの総当たり・列挙攻撃を防止

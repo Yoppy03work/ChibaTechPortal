@@ -9,6 +9,9 @@ import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { prisma } from '@chibatech/db';
 
+// WHY: 個人データに関わるため、キャッシュ方針を統一
+export const dynamic = 'force-dynamic';
+
 const subscribeSchema = z.object({
   endpoint: z.string().url(),
   keys: z.object({

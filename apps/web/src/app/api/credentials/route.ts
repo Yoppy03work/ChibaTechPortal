@@ -18,6 +18,9 @@ import {
   RATE_LIMITS,
 } from '@chibatech/shared';
 
+// WHY: 認証情報に関わるため、キャッシュ方針を統一
+export const dynamic = 'force-dynamic';
+
 const encryptionService = createEncryptionService();
 
 // WHY: 認証情報更新の乱用を防止（1時間に3回まで）
