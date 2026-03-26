@@ -1,0 +1,178 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- ユーザー ---
+
+model User {
+  id           String   @id @default(uuid())
+  studentId    String   @unique @map("student_id")
+  email        String
+  passwordHash String   @map("password_hash")
+  // WHY: 認証情報はAES-256-GCMで暗号化して保存。平文は絶対にDBに入れない
+  encryptedCitCreds   Bytes?   @map("encrypted_cit_creds")
+  encryptedManabaCreds Bytes?  @map("encrypted_manaba_creds")
+  notificationSettings Json?   @map("notification_settings")
+  attendanceSettings   Json?   @map("attendance_settings")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  pushSubscriptions PushSubscription[]
+  timetable         Timetable[]
+  notifications     Notification[]
+  assignments       Assignment[]
+  attendanceLogs    AttendanceLog[]
+  refreshTokens     RefreshToken[]
+
+  @@map("users")
+}
+
+// --- Push通知サブスクリプション ---
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  endpoint  String
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // WHY: 同一ユーザー・同一endpointの重複登録を防止
+  @@unique([userId, endpoint])
+  @@map("push_subscriptions")
+}
+
+// --- 時間割 ---
+
+model Timetable {
+  id                  String  @id @default(uuid())
+  userId              String  @map("user_id")
+  dayOfWeek           Int     @map("day_of_week") // 0=日, 1=月, ..., 6=土
+  period              Int     // 1限〜6限
+  className           String  @map("class_name")
+  room                String?
+  classId             String? @map("class_id")
+  attendanceUrlPattern String? @map("attendance_url_pattern")
+  syllabusId          String? @map("syllabus_id")
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  syllabus       Syllabus?      @relation(fields: [syllabusId], references: [id])
+  attendanceLogs AttendanceLog[]
+
+  @@unique([userId, dayOfWeek, period])
+  @@map("timetables")
+}
+
+// --- お知らせ ---
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  source      String   // 'cit-portal' | 'manaba'
+  // WHY: externalIdは外部システム上のID（差分検出用）、originalUrlは表示用リンク。責務を分離
+  externalId  String   @map("external_id")
+  title       String
+  body        String   @db.Text
+  originalUrl String?  @map("original_url")
+  isRead      Boolean  @default(false) @map("is_read")
+  publishedAt DateTime @map("published_at")
+  fetchedAt   DateTime @default(now()) @map("fetched_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, source, externalId])
+  @@index([userId, isRead])
+  @@index([userId, source])
+  @@map("notifications")
+}
+
+// --- 課題 ---
+
+model Assignment {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  externalId  String    @map("external_id") // manaba上のID（差分検出用）
+  title       String
+  courseName  String    @map("course_name")
+  dueDate     DateTime? @map("due_date")
+  url         String
+  isCompleted Boolean   @default(false) @map("is_completed")
+  fetchedAt   DateTime  @default(now()) @map("fetched_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, externalId])
+  @@index([userId, dueDate])
+  @@map("assignments")
+}
+
+// --- 出席ログ ---
+
+model AttendanceLog {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  timetableId String   @map("timetable_id")
+  classDate   DateTime @map("class_date") @db.Date
+  status      String   // 'success' | 'failed' | 'manual' | 'skipped'
+  method      String   // 'auto' | 'manual' | 'qr-learn'
+  attemptedAt DateTime @default(now()) @map("attempted_at")
+  errorDetail String?  @map("error_detail") @db.Text
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timetable Timetable @relation(fields: [timetableId], references: [id])
+
+  @@index([userId, classDate])
+  @@map("attendance_logs")
+}
+
+// --- シラバス ---
+
+model Syllabus {
+  id            String   @id @default(uuid())
+  academicYear  Int      @map("academic_year")
+  semester      String   // '前期' | '後期' | '通年'
+  courseName    String   @map("course_name")
+  courseCode     String?  @map("course_code")
+  instructor    String
+  department    String
+  campus        String
+  dayOfWeek     String?  @map("day_of_week")
+  period        String?
+  category      String?
+  objectives    String?  @db.Text
+  schedule      String?  @db.Text
+  evaluation    String?  @db.Text
+  textbooks     String?  @db.Text
+  originalUrl   String   @map("original_url")
+  fetchedAt     DateTime @default(now()) @map("fetched_at")
+
+  timetableEntries Timetable[]
+
+  @@map("syllabi")
+}
+
+// --- Refresh Token ---
+// WHY: ローテーション方式で盗難検知するため、使用済みフラグとファミリーを管理
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  family    String   // トークンファミリー（連鎖検知用）
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([family])
+  @@map("refresh_tokens")
+}

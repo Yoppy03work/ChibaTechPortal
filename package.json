@@ -1,0 +1,24 @@
+{
+  "name": "chibatech-portal",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "test:security": "npm run test --workspace=@chibatech/shared",
+    "type-check": "turbo type-check",
+    "lint": "turbo lint"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
+  },
+  "dependencies": {
+    "jsqr": "^1.4.0",
+    "sharp": "^0.34.5"
+  }
+}
