@@ -83,8 +83,12 @@ export const RATE_LIMITS = {
   /** API一般: 1分に60リクエスト */
   api: { maxRequests: 60, windowSeconds: 60 } satisfies RateLimitConfig,
 
-  /** ログイン試行: 5分に5回 */
+  /** ログイン試行: 学籍番号単位、5分に5回 */
   login: { maxRequests: 5, windowSeconds: 5 * 60 } satisfies RateLimitConfig,
+
+  /** ログイン試行: IP単位、5分に20回 */
+  // WHY: 学籍番号を変えながらの総当たりを防止。IP単位は緩めに設定
+  loginPerIp: { maxRequests: 20, windowSeconds: 5 * 60 } satisfies RateLimitConfig,
 
   /** 認証情報更新: 1時間に3回 */
   credentialUpdate: { maxRequests: 3, windowSeconds: 60 * 60 } satisfies RateLimitConfig,

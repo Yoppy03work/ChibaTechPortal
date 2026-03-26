@@ -43,6 +43,13 @@ export {
   RATE_LIMITS,
 } from './lib/rate-limiter';
 
+export { getClientIp } from './lib/client-ip';
+
+export {
+  type RedisClient,
+  RedisRateLimiter,
+} from './lib/redis-rate-limiter';
+
 export {
   type ScrapedNotification,
   sanitizeScrapedData,
