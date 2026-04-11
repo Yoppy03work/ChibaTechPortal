@@ -31,11 +31,50 @@ export interface ScrapedAssignment {
   url: string;
 }
 
+// --- 出席登録支援（3モード設計） ---
+
+/**
+ * 出席モード
+ * WHY: 完全自動出席は不正出席・規約違反のリスクが高い。
+ * デフォルトはconfirm（半自動）。autoはユーザーが明示的にONにした場合のみ。
+ */
+export type AttendanceMode = 'manual' | 'confirm' | 'auto';
+
+/**
+ * 出席フローの判定結果
+ * WHY: AttendanceServiceで出席フローを共通化し、最終送信判断だけモードで分岐する
+ */
+export type AttendanceDecision =
+  | { action: 'open_form'; url: string }
+  | { action: 'require_confirmation'; payload: AttendancePreview }
+  | { action: 'submit'; payload: AttendanceSubmission }
+  | { action: 'block'; reason: string };
+
+/** 確認モード用のプレビュー情報 */
+export interface AttendancePreview {
+  className: string;
+  room: string;
+  period: number;
+  classDate: Date;
+  /** 自動送信の全条件を満たしているか */
+  allConditionsMet: boolean;
+}
+
+/** 送信用データ */
+export interface AttendanceSubmission {
+  userId: string;
+  roomId: string;
+  timetableId: string;
+  classDate: Date;
+}
+
 /** 出席登録結果 */
 export interface AttendanceResult {
   success: boolean;
   message: string; // '出席完了' | '授業なし' | エラーメッセージ
   classDate: Date;
+  // WHY: mode は Adapter の責務外。どのモードで呼んだかはアプリ側の文脈なので、
+  // Worker/Service 層が監査ログ（AttendanceLog.method）に付与する。
 }
 
 /** 出席アダプタ インターフェース */
