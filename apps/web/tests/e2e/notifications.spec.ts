@@ -3,9 +3,11 @@
  */
 import { test, expect } from '@playwright/test';
 import { loginAs } from './helpers/auth';
+import { resetRateLimits } from './helpers/reset-rate-limit';
 
 test.describe('お知らせ', () => {
   test.beforeEach(async ({ page }) => {
+    await resetRateLimits();
     await loginAs(page);
     await page.goto('/notifications');
   });
