@@ -1,5 +1,17 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "NODE_ENV",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "JWT_SECRET",
+    "AUTH_SECRET",
+    "AUTH_TRUST_HOST",
+    "ENCRYPTION_MASTER_KEY",
+    "REFRESH_TOKEN_PEPPER",
+    "NEXTAUTH_URL",
+    "TRUSTED_PROXY_COUNT"
+  ],
   "tasks": {
     "dev": {
       "cache": false,
