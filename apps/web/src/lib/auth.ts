@@ -99,11 +99,13 @@ export const {
     async signIn({ user }) {
       if (!user?.id) return;
 
-      const rt = createRefreshToken(user.id);
-      await refreshTokenStore.save(rt);
+      // WHY: `createRefreshToken` は { rawToken, record } を返す。
+      // `rawToken` はクッキーに、`record` (HMAC ハッシュ) は DB に保存する。
+      const issue = createRefreshToken(user.id);
+      await refreshTokenStore.save(issue.record);
 
       const cookieStore = await cookies();
-      cookieStore.set(REFRESH_TOKEN_COOKIE, rt.token, {
+      cookieStore.set(REFRESH_TOKEN_COOKIE, issue.rawToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',

@@ -15,6 +15,7 @@ env:
   JWT_SECRET: test-jwt-secret-key-at-least-32-characters-long
   ENCRYPTION_MASTER_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   AUTH_SECRET: test-auth-secret-for-ci
+  REFRESH_TOKEN_PEPPER: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   NEXTAUTH_URL: http://localhost:3000
   NODE_ENV: test
 
