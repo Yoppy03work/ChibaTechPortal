@@ -143,5 +143,8 @@ jobs:
         env:
           CI: "true"
           NODE_ENV: production
+          # WHY: NextAuth v5 は production で Host ヘッダ検証が必須。
+          # CI は http://localhost で動かすため、trustHost を明示的に有効化する。
+          AUTH_TRUST_HOST: "true"
           E2E_TEST_STUDENT_ID: T00E0001
           E2E_TEST_PASSWORD: e2e-test-password-2026
