@@ -22,5 +22,14 @@ export async function loginAs(
   await page.getByLabel('パスワード').fill(password);
   await page.getByRole('button', { name: 'ログイン' }).click();
   // ダッシュボードに遷移するまで待機
-  await page.waitForURL('/', { timeout: 10000 });
+  try {
+    await page.waitForURL('/', { timeout: 10000 });
+  } catch (err) {
+    // WHY: 失敗時の原因切り分け用。ページ上のエラー表示とURLを残す
+    const currentUrl = page.url();
+    const errorText = await page.locator('[class*="text-red"]').textContent().catch(() => null);
+    // eslint-disable-next-line no-console
+    console.error(`[loginAs] navigation failed: url=${currentUrl} error="${errorText}"`);
+    throw err;
+  }
 }
