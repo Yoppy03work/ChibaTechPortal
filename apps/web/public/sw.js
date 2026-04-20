@@ -2,31 +2,77 @@
  * Service Worker
  *
  * WHY: Push通知受信、App Shellキャッシュを担当。
- * セキュリティ上、認証済みAPIレスポンスやダッシュボードページはキャッシュしない。
- * キャッシュ対象は公開ページ（/login, /offline）と静的アセットのみ。
+ * セキュリティ原則:
+ *  - キャッシュは **allowlist** のみ（blocklist は把握漏れで個人データが残りやすい）
+ *  - GET かつ same-origin かつ allowlist 合致のレスポンスだけ cache.put
+ *  - 通知クリックで開く URL は same-origin + 許可パスに限定（Push payload 汚染対策）
  */
 
-const CACHE_NAME = 'ctp-v2';
+const CACHE_NAME = 'ctp-v3';
 
-/** キャッシュ対象の公開ページ（認証不要） */
-const PRECACHE_URLS = [
+/** プリキャッシュする公開ページ（認証不要） */
+const PRECACHE_URLS = ['/login', '/offline'];
+
+/**
+ * キャッシュ対象の allowlist。
+ * WHY: sw.js 自身はキャッシュしない（SW 更新の混乱を避けるため network-only）。
+ */
+const CACHEABLE_PREFIXES = [
+  '/_next/static/',
+  '/icons/',
+];
+
+const CACHEABLE_EXACT = new Set([
   '/login',
   '/offline',
+  '/manifest.json',
+  '/favicon.ico',
+  '/robots.txt',
+]);
+
+/** 通知クリックで開いてよい pathname の allowlist（prefix） */
+const ALLOWED_NOTIFICATION_PATHS = [
+  '/',
+  '/notifications',
+  '/attendance',
+  '/timetable',
 ];
 
 /**
- * キャッシュしてはいけないパスのプレフィックス
- * WHY: 個人データ（お知らせ、時間割、出席ログ等）がブラウザに残り、
- * ログアウト後や共有端末で再表示されるリスクを防止する
+ * WHY: GET + same-origin + allowlist をすべて満たす request のみキャッシュ対象。
  */
-const NO_CACHE_PREFIXES = [
-  '/api/',       // 認証済みAPIレスポンス（個人データ）
-  '/dashboard',  // ダッシュボードページ
-];
+function isCacheableRequest(request) {
+  if (request.method !== 'GET') return false;
 
-/** キャッシュ対象外かどうか判定する */
-function shouldNotCache(pathname) {
-  return NO_CACHE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return false;
+
+  if (CACHEABLE_EXACT.has(url.pathname)) return true;
+  return CACHEABLE_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
+}
+
+/**
+ * 通知 data.url を同一 origin + 許可パスに制限して解決する。
+ * Push payload が汚染されても外部フィッシング URL に飛ばないようにする。
+ */
+function resolveNotificationUrl(rawUrl) {
+  const fallback = new URL('/', self.location.origin);
+
+  let parsed;
+  try {
+    parsed = new URL(rawUrl ?? '/', self.location.origin);
+  } catch {
+    return fallback;
+  }
+
+  if (parsed.origin !== self.location.origin) return fallback;
+
+  const ok = ALLOWED_NOTIFICATION_PATHS.some(
+    (prefix) =>
+      parsed.pathname === prefix ||
+      (prefix !== '/' && parsed.pathname.startsWith(prefix + '/'))
+  );
+  return ok ? parsed : fallback;
 }
 
 // --- Install: App Shell をキャッシュ ---
@@ -51,45 +97,37 @@ self.addEventListener('activate', (event) => {
 
 // --- Fetch ---
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-
-  // WHY: APIリクエストと認証済みページはキャッシュしない（network-only）
-  if (shouldNotCache(url.pathname)) {
-    event.respondWith(fetch(event.request));
-    return;
+  // WHY: allowlist を満たさないリクエストは完全に network-only。
+  // 個人データ・認証済みページ・SW 自身・クロスオリジンを一切キャッシュしない。
+  if (!isCacheableRequest(event.request)) {
+    return; // pass through: デフォルトのネットワークフェッチに委ねる
   }
 
-  // 静的アセット・公開ページ: キャッシュ優先 + バックグラウンド更新（SWR）
+  // allowlist: キャッシュ優先 + バックグラウンド更新（SWR）
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fetchPromise = fetch(event.request)
         .then((resp) => {
-          // WHY: 成功レスポンスのみキャッシュ（エラーページをキャッシュしない）
           if (resp.ok) {
             const clone = resp.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
           return resp;
         })
-        .catch(() => {
-          // オフライン時はキャッシュから返す。キャッシュもなければオフラインページ
-          return cached || caches.match('/offline');
-        });
+        .catch(() => cached || caches.match('/offline'));
       return cached || fetchPromise;
     })
   );
 });
 
 // --- メッセージ: ログアウト時のキャッシュクリア ---
-// WHY: ログアウト時にクライアントからpostMessageでキャッシュ全削除を指示する。
-// 共有端末で前ユーザーの個人データがキャッシュに残るのを防止する。
+// WHY: ログアウト時にクライアントから postMessage でキャッシュ全削除を指示する。
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'CLEAR_CACHE') {
     event.waitUntil(
-      caches.delete(CACHE_NAME).then(() => {
-        // 公開ページのみ再キャッシュ
-        return caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS));
-      })
+      caches.delete(CACHE_NAME).then(() =>
+        caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
+      )
     );
   }
 });
@@ -106,10 +144,8 @@ self.addEventListener('push', (event) => {
     data: {
       url: data.data?.url || '/',
     },
-    // WHY: vibrate で物理的に気づきやすくする（モバイル向け）
     vibrate: [200, 100, 200],
     tag: data.data?.source || 'general',
-    // WHY: renotify で同じtagでも再通知する
     renotify: true,
   };
 
@@ -122,16 +158,26 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const url = event.notification.data?.url || '/';
+  const target = resolveNotificationUrl(event.notification.data?.url);
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window' }).then((clients) => {
       for (const client of clients) {
-        if (client.url.includes(url) && 'focus' in client) {
+        let clientUrl;
+        try {
+          clientUrl = new URL(client.url);
+        } catch {
+          continue;
+        }
+        if (
+          clientUrl.origin === target.origin &&
+          clientUrl.pathname === target.pathname &&
+          'focus' in client
+        ) {
           return client.focus();
         }
       }
-      return self.clients.openWindow(url);
+      return self.clients.openWindow(target.toString());
     })
   );
 });

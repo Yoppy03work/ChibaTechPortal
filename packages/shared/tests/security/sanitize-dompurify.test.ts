@@ -99,4 +99,46 @@ describe('sanitizeRichHtml（リッチHTML保持）', () => {
     const result = sanitizeRichHtml('<p style="color:red">text</p>');
     expect(result).not.toContain('style');
   });
+
+  describe('リンク属性（target不許可 + URIスキーム制限）', () => {
+    it('target属性は剥がされる（reverse tabnabbing対策）', () => {
+      const result = sanitizeRichHtml('<a href="https://example.com" target="_blank">link</a>');
+      expect(result).not.toContain('target');
+    });
+
+    it('入力側の rel も剥がされる（ALLOWED_ATTR 外）', () => {
+      const result = sanitizeRichHtml('<a href="https://example.com" rel="nofollow">link</a>');
+      expect(result).not.toContain('rel=');
+    });
+
+    it('https: リンクは保持', () => {
+      const result = sanitizeRichHtml('<a href="https://example.com">x</a>');
+      expect(result).toContain('href="https://example.com"');
+    });
+
+    it('http: リンクは保持（学内ホスト想定）', () => {
+      const result = sanitizeRichHtml('<a href="http://internal.example.ac.jp">x</a>');
+      expect(result).toContain('href="http://internal.example.ac.jp"');
+    });
+
+    it('mailto: リンクは保持', () => {
+      const result = sanitizeRichHtml('<a href="mailto:foo@example.com">x</a>');
+      expect(result).toContain('href="mailto:foo@example.com"');
+    });
+
+    it('tel: リンクは除去される（許可スキーム外）', () => {
+      const result = sanitizeRichHtml('<a href="tel:0312345678">x</a>');
+      expect(result).not.toContain('tel:');
+    });
+
+    it('javascript: リンクは除去される', () => {
+      const result = sanitizeRichHtml('<a href="javascript:alert(1)">x</a>');
+      expect(result).not.toContain('javascript');
+    });
+
+    it('data: リンクは除去される', () => {
+      const result = sanitizeRichHtml('<a href="data:text/html,<script>alert(1)</script>">x</a>');
+      expect(result).not.toContain('data:');
+    });
+  });
 });
