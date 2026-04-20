@@ -130,21 +130,14 @@ jobs:
 
       - run: npx playwright install chromium --with-deps
 
-      # WHY: CI環境ではproduction buildしてstartする。NODE_ENV=testだとNext.jsの最適化が無効になる
-      - name: Build Next.js app
-        working-directory: apps/web
-        run: npx next build
-        env:
-          NODE_ENV: production
-
+      # WHY: E2E は dev モードで実行する。production + HTTP では NextAuth の
+      # Secure cookie / Host 検証が働かずログインフローが成立しないため、
+      # perf より信頼性を優先して dev モードで統一する。
       - name: Run E2E tests
         working-directory: apps/web
         run: npx playwright test
         env:
           CI: "true"
-          NODE_ENV: production
-          # WHY: NextAuth v5 は production で Host ヘッダ検証が必須。
-          # CI は http://localhost で動かすため、trustHost を明示的に有効化する。
           AUTH_TRUST_HOST: "true"
           E2E_TEST_STUDENT_ID: T00E0001
           E2E_TEST_PASSWORD: e2e-test-password-2026
