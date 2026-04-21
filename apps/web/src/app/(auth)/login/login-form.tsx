@@ -18,41 +18,29 @@ export function LoginForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    // eslint-disable-next-line no-console
-    console.log('[login-form] handleSubmit START', { studentId, hasPassword: !!password });
     setError('');
 
     // WHY: クライアント側でもZodバリデーションし、不正な入力を早期にブロック
     const parsed = loginSchema.safeParse({ studentId, password });
     if (!parsed.success) {
-      // eslint-disable-next-line no-console
-      console.log('[login-form] zod parse failed', parsed.error.errors);
       setError(parsed.error.errors[0]?.message || 'Invalid input');
       return;
     }
 
     setLoading(true);
     try {
-      // eslint-disable-next-line no-console
-      console.log('[login-form] calling signIn');
       const result = await signIn('credentials', {
         studentId: parsed.data.studentId,
         password: parsed.data.password,
         redirect: false,
       });
-      // eslint-disable-next-line no-console
-      console.log('[login-form] signIn result', { error: result?.error, status: result?.status, ok: result?.ok, url: result?.url });
 
       if (result?.error) {
         setError('学籍番号またはパスワードが正しくありません');
       } else {
-        // eslint-disable-next-line no-console
-        console.log('[login-form] navigating to /');
         window.location.href = '/';
       }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[login-form] signIn threw', err);
+    } catch {
       setError('ログインに失敗しました。もう一度お試しください。');
     } finally {
       setLoading(false);
