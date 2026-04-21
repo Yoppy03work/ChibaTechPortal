@@ -13,7 +13,8 @@ test.describe('時間割', () => {
   });
 
   test('時間割ページのタイトルが表示される', async ({ page }) => {
-    await expect(page.getByText('時間割')).toBeVisible();
+    // WHY: BottomNavにも「時間割」リンクがあるため、heading で限定する
+    await expect(page.getByRole('heading', { name: '時間割' })).toBeVisible();
   });
 
   test('曜日ヘッダー（月〜土）が表示される', async ({ page }) => {

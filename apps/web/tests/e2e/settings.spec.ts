@@ -25,7 +25,8 @@ test.describe('設定', () => {
   });
 
   test('通知設定セクションが表示される', async ({ page }) => {
-    await expect(page.getByText('通知設定')).toBeVisible();
+    // WHY: 見出しでピン留め（他箇所のテキスト一致を避ける）
+    await expect(page.getByRole('heading', { name: '通知設定' })).toBeVisible();
     await expect(page.getByText('Push通知')).toBeVisible();
     await expect(page.getByText('メール通知')).toBeVisible();
   });
