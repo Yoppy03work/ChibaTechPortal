@@ -20,7 +20,11 @@ export const REQUIRED_SECURITY_HEADERS: Record<string, string> = {
 /** Content Security Policy ディレクティブ */
 export const REQUIRED_CSP_DIRECTIVES: string[] = [
   "default-src 'self'",
-  "script-src 'self'",
+  // WHY: Next.js は hydration/ルーティング用の inline script を挿入する。
+  // これをブロックすると React が hydrate できず、onSubmit 等のイベントハンドラが
+  // アタッチされない（結果としてログインフォームがネイティブGET送信になる）。
+  // 将来的には per-request nonce + 'strict-dynamic' への移行が望ましい。
+  "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'", // Tailwind CSS
   "img-src 'self' data:",
   "font-src 'self'",
