@@ -17,7 +17,13 @@ export const REQUIRED_SECURITY_HEADERS: Record<string, string> = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
 };
 
-/** Content Security Policy ディレクティブ */
+/**
+ * Content Security Policy ディレクティブの基本構成（script-src は buildCspHeader で差し替え）
+ *
+ * WHY: script-src は nonce 方式で per-request に変わるため、ここには含めない。
+ * テスト・ドキュメント用に「nonce なしの strict デフォルト」も buildCspHeader(undefined)
+ * で取得可能。
+ */
 export const REQUIRED_CSP_DIRECTIVES: string[] = [
   "default-src 'self'",
   "script-src 'self'",
@@ -28,9 +34,24 @@ export const REQUIRED_CSP_DIRECTIVES: string[] = [
   'frame-ancestors none',
 ];
 
-/** CSPヘッダー文字列を生成する */
-export function buildCspHeader(): string {
-  return REQUIRED_CSP_DIRECTIVES.join('; ');
+/**
+ * CSP ヘッダー文字列を生成する。
+ *
+ * WHY: Next.js は hydration/ルーティング用の inline script を挿入するため、
+ * `'self'` のみだと React が hydrate できない。middleware で per-request nonce を
+ * 生成し `script-src 'self' 'nonce-XXX' 'strict-dynamic'` を発行することで、
+ * `'unsafe-inline'` を使わずに Next.js のスクリプトを許可する。
+ *
+ * @param nonce - middleware で生成された base64 nonce。未指定時は strict 設定（テスト用途）
+ */
+export function buildCspHeader(nonce?: string): string {
+  const directives = REQUIRED_CSP_DIRECTIVES.map((d) => {
+    if (!d.startsWith('script-src')) return d;
+    return nonce
+      ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
+      : "script-src 'self'";
+  });
+  return directives.join('; ');
 }
 
 /** 許可するオリジン */
