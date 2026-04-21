@@ -87,10 +87,19 @@ describe('getClientIp', () => {
     expect(getClientIp(makeHeaders(''))).toBeNull();
   });
 
-  it('x-real-ipヘッダーがある場合はそれを優先する', () => {
+  it('x-real-ipヘッダーは信用しない（任意クライアントが偽装可能）', () => {
+    // WHY: trusted proxy の仕組みが未整備のため採用しない。
+    // 将来 CF-Connecting-IP 等 CDN 固有ヘッダを別途扱う。
+    process.env.TRUSTED_PROXY_COUNT = '1';
     const h = new Headers();
     h.set('x-real-ip', '198.51.100.10');
-    h.set('x-forwarded-for', '1.2.3.4, 10.0.0.1');
-    expect(getClientIp(h)).toBe('198.51.100.10');
+    h.set('x-forwarded-for', '203.0.113.50, 10.0.0.1');
+    expect(getClientIp(h)).toBe('203.0.113.50');
+  });
+
+  it('x-real-ipだけが付いている場合はnull（x-forwarded-forがなければ無視）', () => {
+    const h = new Headers();
+    h.set('x-real-ip', '198.51.100.10');
+    expect(getClientIp(h)).toBeNull();
   });
 });

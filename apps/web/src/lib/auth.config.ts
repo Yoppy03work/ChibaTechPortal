@@ -11,10 +11,6 @@ export const authConfig = {
   // WHY: providersは空。auth.tsでCredentials Providerを追加する
   providers: [],
 
-  // WHY: Self-host では Host ヘッダを信用する（本番はリバプロ前段で検証する前提）。
-  // env AUTH_TRUST_HOST でなく config 直接指定にして、誤設定で落ちないようにする。
-  trustHost: true,
-
   session: {
     strategy: 'jwt',
     // WHY: アクセストークン15分で短寿命化し、セッションハイジャックのリスクを最小化
