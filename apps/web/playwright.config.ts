@@ -21,9 +21,11 @@ export default defineConfig({
   ],
 
   webServer: {
+    // WHY: production モードは NextAuth の Secure cookie / Host 検証が HTTP で働かず
+    // E2E でログインフローが成立しない。dev モードで統一する（perf より信頼性を優先）。
     command: 'npm run dev',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
-    timeout: 30000,
+    timeout: 120000,
   },
 });

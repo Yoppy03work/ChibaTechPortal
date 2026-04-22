@@ -17,13 +17,16 @@ const BCRYPT_ROUNDS = 12;
 
 export async function POST(request: Request) {
   // WHY: 信頼できるプロキシチェーンからクライアントIPを抽出（偽装耐性あり）
+  // IPが取得できない場合はIPベースリミットをスキップ（共有バケット問題を回避）
   const ip = getClientIp(request.headers);
-  const rateResult = await rateLimiter.check(`register:${ip}`, RATE_LIMITS.login);
-  if (!rateResult.allowed) {
-    return NextResponse.json(
-      { error: 'Too many requests' },
-      { status: 429, headers: { 'Retry-After': String(Math.ceil((rateResult.resetAt.getTime() - Date.now()) / 1000)) } }
-    );
+  if (ip) {
+    const rateResult = await rateLimiter.check(`register:${ip}`, RATE_LIMITS.login);
+    if (!rateResult.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil((rateResult.resetAt.getTime() - Date.now()) / 1000)) } }
+      );
+    }
   }
 
   let body: unknown;

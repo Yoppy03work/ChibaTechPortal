@@ -21,6 +21,6 @@ export async function loginAs(
   await page.getByLabel('学籍番号').fill(studentId);
   await page.getByLabel('パスワード').fill(password);
   await page.getByRole('button', { name: 'ログイン' }).click();
-  // ダッシュボードに遷移するまで待機
+  // WHY: window.location.href='/' でダッシュボードに遷移するまで待つ
   await page.waitForURL('/', { timeout: 10000 });
 }

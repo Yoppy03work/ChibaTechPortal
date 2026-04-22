@@ -3,9 +3,11 @@
  */
 import { test, expect } from '@playwright/test';
 import { loginAs } from './helpers/auth';
+import { resetRateLimits } from './helpers/reset-rate-limit';
 
 test.describe('設定', () => {
   test.beforeEach(async ({ page }) => {
+    await resetRateLimits();
     await loginAs(page);
     await page.goto('/settings');
   });
@@ -23,9 +25,11 @@ test.describe('設定', () => {
   });
 
   test('通知設定セクションが表示される', async ({ page }) => {
-    await expect(page.getByText('通知設定')).toBeVisible();
-    await expect(page.getByText('Push通知')).toBeVisible();
-    await expect(page.getByText('メール通知')).toBeVisible();
+    // WHY: 見出しでピン留め（他箇所のテキスト一致を避ける）
+    await expect(page.getByRole('heading', { name: '通知設定' })).toBeVisible();
+    // WHY: 説明文「ブラウザにPush通知を送信」にも「Push通知」が含まれるため exact で限定
+    await expect(page.getByText('Push通知', { exact: true })).toBeVisible();
+    await expect(page.getByText('メール通知', { exact: true })).toBeVisible();
   });
 
   test('ログアウトボタンが表示される', async ({ page }) => {

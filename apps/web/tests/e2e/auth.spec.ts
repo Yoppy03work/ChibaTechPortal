@@ -3,8 +3,11 @@
  */
 import { test, expect } from '@playwright/test';
 import { loginAs } from './helpers/auth';
+import { resetRateLimits } from './helpers/reset-rate-limit';
 
 test.describe('認証フロー', () => {
+  test.beforeEach(resetRateLimits);
+
   test('未認証でダッシュボードにアクセスするとログインページにリダイレクトされる', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/login/);

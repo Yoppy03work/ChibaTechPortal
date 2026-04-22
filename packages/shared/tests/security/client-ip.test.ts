@@ -25,8 +25,10 @@ describe('getClientIp', () => {
     }
   });
 
-  it('x-forwarded-forがない場合はunknownを返す', () => {
-    expect(getClientIp(makeHeaders())).toBe('unknown');
+  it('x-forwarded-forがない場合はnullを返す', () => {
+    // WHY: nullにより呼び出し側がIPベースリミットをスキップできる。
+    // 'unknown'だと全ユーザーが共有バケットでレートリミットされる運用リスクがある
+    expect(getClientIp(makeHeaders())).toBeNull();
   });
 
   it('単一IPの場合はそのまま返す（TRUSTED_PROXY_COUNT=0）', () => {
@@ -81,7 +83,23 @@ describe('getClientIp', () => {
     expect(getClientIp(makeHeaders(' 203.0.113.50 , 10.0.0.1 '))).toBe('203.0.113.50');
   });
 
-  it('空文字列の場合はunknownを返す', () => {
-    expect(getClientIp(makeHeaders(''))).toBe('unknown');
+  it('空文字列の場合はnullを返す', () => {
+    expect(getClientIp(makeHeaders(''))).toBeNull();
+  });
+
+  it('x-real-ipヘッダーは信用しない（任意クライアントが偽装可能）', () => {
+    // WHY: trusted proxy の仕組みが未整備のため採用しない。
+    // 将来 CF-Connecting-IP 等 CDN 固有ヘッダを別途扱う。
+    process.env.TRUSTED_PROXY_COUNT = '1';
+    const h = new Headers();
+    h.set('x-real-ip', '198.51.100.10');
+    h.set('x-forwarded-for', '203.0.113.50, 10.0.0.1');
+    expect(getClientIp(h)).toBe('203.0.113.50');
+  });
+
+  it('x-real-ipだけが付いている場合はnull（x-forwarded-forがなければ無視）', () => {
+    const h = new Headers();
+    h.set('x-real-ip', '198.51.100.10');
+    expect(getClientIp(h)).toBeNull();
   });
 });
