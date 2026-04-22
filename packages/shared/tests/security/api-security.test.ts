@@ -11,6 +11,7 @@ import {
 import {
   REQUIRED_SECURITY_HEADERS,
   REQUIRED_CSP_DIRECTIVES,
+  buildCspHeader,
   ALLOWED_ORIGINS,
   AUTH_REQUIRED_PATHS,
   AUTH_NOT_REQUIRED_PATHS,
@@ -156,6 +157,39 @@ describe('セキュリティヘッダー検証', () => {
   it('カメラとマイクがPermissions-Policyで無効化されている', () => {
     expect(REQUIRED_SECURITY_HEADERS['Permissions-Policy']).toContain('camera=()');
     expect(REQUIRED_SECURITY_HEADERS['Permissions-Policy']).toContain('microphone=()');
+  });
+});
+
+describe('buildCspHeader（nonce方式）', () => {
+  it('nonce未指定ならstrictなscript-src self のみ', () => {
+    const csp = buildCspHeader();
+    const scriptSrc = csp.split(';').find((d) => d.trim().startsWith('script-src'))!;
+    expect(scriptSrc.trim()).toBe("script-src 'self'");
+    expect(scriptSrc).not.toContain('nonce');
+    expect(scriptSrc).not.toContain('unsafe-inline');
+  });
+
+  it('nonce指定時はscript-src selfに加えnonceとstrict-dynamicを発行', () => {
+    const csp = buildCspHeader('abc123');
+    expect(csp).toContain("'nonce-abc123'");
+    expect(csp).toContain("'strict-dynamic'");
+    expect(csp).toContain("script-src 'self'");
+  });
+
+  it('script-src以外のディレクティブはnonce有無で変わらない', () => {
+    const withNonce = buildCspHeader('nonce-xyz');
+    const withoutNonce = buildCspHeader();
+    for (const dir of ["default-src 'self'", 'frame-ancestors none', "img-src 'self' data:"]) {
+      expect(withNonce).toContain(dir);
+      expect(withoutNonce).toContain(dir);
+    }
+  });
+
+  it('script-srcにunsafe-inlineは入らない（XSS緩和を維持）', () => {
+    const withNonce = buildCspHeader('abc');
+    const scriptSrc = withNonce.split(';').find((d) => d.trim().startsWith('script-src'));
+    expect(scriptSrc).toBeDefined();
+    expect(scriptSrc).not.toContain("'unsafe-inline'");
   });
 });
 
