@@ -10,7 +10,8 @@
     "ENCRYPTION_MASTER_KEY",
     "REFRESH_TOKEN_PEPPER",
     "NEXTAUTH_URL",
-    "TRUSTED_PROXY_COUNT"
+    "TRUSTED_PROXY_COUNT",
+    "TRUST_X_FORWARDED_FOR"
   ],
   "tasks": {
     "dev": {
