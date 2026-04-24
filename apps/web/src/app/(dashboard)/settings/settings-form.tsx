@@ -202,7 +202,16 @@ export function SettingsForm() {
 
       {/* ログアウト */}
       <button
-        onClick={() => signOut({ callbackUrl: '/login' })}
+        onClick={() => {
+          // WHY: ログアウト前にSWキャッシュをクリアし、個人データがブラウザに残らないようにする。
+          // navigator.serviceWorker.ready は SW が未登録/未起動のとき hang する可能性があるため、
+          // controller（現在アクティブなSW）にのみ fire-and-forget でメッセージ送信する。
+          // controller が未定義なら何もしない（キャッシュがそもそも無いため問題なし）。
+          if (typeof navigator !== 'undefined' && navigator.serviceWorker?.controller) {
+            navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHE' });
+          }
+          signOut({ callbackUrl: '/login' });
+        }}
         className="w-full rounded border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
       >
         ログアウト
