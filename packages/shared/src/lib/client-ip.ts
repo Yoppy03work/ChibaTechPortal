@@ -1,15 +1,30 @@
 /**
  * 信頼できるクライアントIP抽出
  *
- * WHY: x-forwarded-for の左端はクライアントが自由に偽装できる。
- * 逆プロキシが付与するのは右端なので、信頼するプロキシ数に応じて
- * 右端から N 番目を取ることで偽装を無視する。
+ * セキュリティ設計:
+ *   x-forwarded-for / x-real-ip どちらもクライアントが自由に偽装できる。
+ *   信頼できるリバースプロキシ経由でのみアプリに到達する構成 *かつ* プロキシが
+ *   x-forwarded-for を正しく付け替える運用になっている場合に限って IP を信頼できる。
  *
- * x-real-ip は扱わない:
- *   任意のクライアントが送れるヘッダであり、信頼できるプロキシからのみ設定される保証がない。
- *   trusted proxy の仕組み（middleware で x-forwarded-for のみ再構築する等）が
- *   整ってから、もしくは将来 CF-Connecting-IP 等の CDN 固有ヘッダを別途扱う。
+ *   現状このコードベースには、直接到達できる配置と proxy 配下の配置を区別する
+ *   仕組みがない。そのため **デフォルトでは x-forwarded-for を読まない** 方針にし、
+ *   TRUST_X_FORWARDED_FOR=true を明示指定した場合のみ IP 抽出を有効化する。
+ *   opt-in されていない時は null を返し、IP ベースのレートリミットをスキップさせる
+ *   （sid ベースのレートリミットは維持されるため、アカウント単位のブルートフォース
+ *   対策は機能する）。
  */
+
+function getTrustedProxyCount(): number {
+  const raw = (process.env.TRUSTED_PROXY_COUNT ?? '1').trim();
+  // WHY: 非負整数のみ許可。NaN や負数/小数で静かに無効化されると IP 制限が
+  // スキップされるため、壊れた値は起動時に fail-fast にする（セキュリティ設定）。
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(
+      `TRUSTED_PROXY_COUNT must be a non-negative integer, got: ${JSON.stringify(process.env.TRUSTED_PROXY_COUNT)}`
+    );
+  }
+  return parseInt(raw, 10);
+}
 
 /**
  * リクエストから信頼できるクライアントIPを抽出する
@@ -20,6 +35,12 @@
  * 同一バケットでレートリミットされログイン不能になる運用リスクがある。
  */
 export function getClientIp(headers: Headers): string | null {
+  // WHY: opt-in チェック。未設定なら x-forwarded-for を一切読まない。
+  // TRUSTED_PROXY_COUNT の検証はここを通過してから（未使用環境で不要な起動失敗を避ける）
+  if (process.env.TRUST_X_FORWARDED_FOR !== 'true') {
+    return null;
+  }
+
   const xForwardedFor = headers.get('x-forwarded-for');
   if (!xForwardedFor) {
     return null;
@@ -31,10 +52,7 @@ export function getClientIp(headers: Headers): string | null {
     return null;
   }
 
-  const trustedProxyCount = parseInt(
-    process.env.TRUSTED_PROXY_COUNT ?? '1',
-    10
-  );
+  const trustedProxyCount = getTrustedProxyCount();
 
   // WHY: 右端から trustedProxyCount 番目がクライアント IP
   const index = ips.length - 1 - trustedProxyCount;

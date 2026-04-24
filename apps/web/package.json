@@ -10,7 +10,7 @@
     "start": "next start",
     "type-check": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "echo \"No unit tests yet\"",
+    "test": "vitest run",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -31,6 +31,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   }
 }

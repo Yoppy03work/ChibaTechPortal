@@ -4,19 +4,13 @@
  * JWT生成・検証、Refresh Tokenローテーション、セッション無効化をテストする。
  * テスト対象: src/lib/auth.ts の実装
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as jose from 'jose';
-import crypto from 'node:crypto';
 import {
-  type JwtPayload,
-  type RefreshTokenRecord,
   ACCESS_TOKEN_EXPIRY,
-  REFRESH_TOKEN_EXPIRY,
   getJwtSecret,
   generateAccessToken,
   verifyAccessToken,
-  InMemoryRefreshTokenStore,
-  createRefreshToken,
 } from '@/lib/auth';
 
 // --- テスト用ヘルパー ---
@@ -137,134 +131,8 @@ describe('JWT アクセストークン', () => {
   });
 });
 
-describe('Refresh Token ローテーション', () => {
-  let store: InMemoryRefreshTokenStore;
-
-  beforeEach(() => {
-    store = new InMemoryRefreshTokenStore();
-  });
-
-  it('Refresh Tokenを生成してストアに保存できる', async () => {
-    const token = crypto.randomUUID();
-    const family = crypto.randomUUID();
-    const record: RefreshTokenRecord = {
-      token,
-      userId: 'user-123',
-      expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRY * 1000),
-      used: false,
-      family,
-    };
-    await store.save(record);
-    const found = await store.findByToken(token);
-    expect(found).not.toBeNull();
-    expect(found!.userId).toBe('user-123');
-    expect(found!.used).toBe(false);
-  });
-
-  it('使用済みRefresh Tokenを再利用しようとすると検知できる', async () => {
-    const token = crypto.randomUUID();
-    const family = crypto.randomUUID();
-    await store.save({
-      token,
-      userId: 'user-123',
-      expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRY * 1000),
-      used: false,
-      family,
-    });
-
-    // 1回目の使用: 正常
-    await store.markUsed(token);
-    const record = await store.findByToken(token);
-    expect(record!.used).toBe(true);
-
-    // 2回目の使用: 盗難の可能性 → ファミリー全体を無効化
-    if (record!.used) {
-      await store.revokeFamily(family);
-    }
-    const revoked = await store.findByToken(token);
-    expect(revoked).toBeNull();
-  });
-
-  it('期限切れRefresh Tokenを拒否する', async () => {
-    const token = crypto.randomUUID();
-    await store.save({
-      token,
-      userId: 'user-123',
-      expiresAt: new Date(Date.now() - 1000), // 過去
-      used: false,
-      family: crypto.randomUUID(),
-    });
-
-    const record = await store.findByToken(token);
-    expect(record).not.toBeNull();
-    expect(record!.expiresAt.getTime()).toBeLessThan(Date.now());
-  });
-
-  it('トークンファミリー全体を無効化できる', async () => {
-    const family = crypto.randomUUID();
-    const token1 = crypto.randomUUID();
-    const token2 = crypto.randomUUID();
-
-    await store.save({
-      token: token1,
-      userId: 'user-123',
-      expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRY * 1000),
-      used: true,
-      family,
-    });
-    await store.save({
-      token: token2,
-      userId: 'user-123',
-      expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRY * 1000),
-      used: false,
-      family,
-    });
-
-    await store.revokeFamily(family);
-    expect(await store.findByToken(token1)).toBeNull();
-    expect(await store.findByToken(token2)).toBeNull();
-  });
-});
-
-describe('セッション無効化（ログアウト）', () => {
-  let store: InMemoryRefreshTokenStore;
-
-  beforeEach(() => {
-    store = new InMemoryRefreshTokenStore();
-  });
-
-  it('ユーザーの全セッションを無効化できる', async () => {
-    const userId = 'user-123';
-    // 複数デバイスからのセッション
-    await store.save({
-      token: crypto.randomUUID(),
-      userId,
-      expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRY * 1000),
-      used: false,
-      family: crypto.randomUUID(),
-    });
-    await store.save({
-      token: crypto.randomUUID(),
-      userId,
-      expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRY * 1000),
-      used: false,
-      family: crypto.randomUUID(),
-    });
-
-    await store.revokeAllForUser(userId);
-
-    // 他のユーザーのセッションは影響しない
-    const otherToken = crypto.randomUUID();
-    await store.save({
-      token: otherToken,
-      userId: 'other-user',
-      expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRY * 1000),
-      used: false,
-      family: crypto.randomUUID(),
-    });
-    expect(await store.findByToken(otherToken)).not.toBeNull();
-  });
-});
+// WHY: Refresh Tokenローテーション・ファミリー失効・ユーザー全失効は
+// tests/security/refresh-token-rotation.test.ts に集約（新API: markUsedAtomically）。
 
 describe('JWT Secret 管理', () => {
   const originalEnv = process.env.JWT_SECRET;

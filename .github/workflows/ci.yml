@@ -15,7 +15,11 @@ env:
   JWT_SECRET: test-jwt-secret-key-at-least-32-characters-long
   ENCRYPTION_MASTER_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   AUTH_SECRET: test-auth-secret-for-ci
+  REFRESH_TOKEN_PEPPER: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   NEXTAUTH_URL: http://localhost:3000
+  # WHY: CI では localhost 直配置のため、x-forwarded-for を読まなくても
+  # 実質 IP 制限は働く必要がない。ただしテストで opt-in 経路を通すため true にする。
+  TRUST_X_FORWARDED_FOR: "true"
   NODE_ENV: test
 
 jobs:
