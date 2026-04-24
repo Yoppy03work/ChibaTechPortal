@@ -202,11 +202,13 @@ export function SettingsForm() {
 
       {/* ログアウト */}
       <button
-        onClick={async () => {
-          // WHY: ログアウト前にSWキャッシュをクリアし、個人データがブラウザに残らないようにする
-          if ('serviceWorker' in navigator) {
-            const reg = await navigator.serviceWorker.ready;
-            reg.active?.postMessage({ type: 'CLEAR_CACHE' });
+        onClick={() => {
+          // WHY: ログアウト前にSWキャッシュをクリアし、個人データがブラウザに残らないようにする。
+          // navigator.serviceWorker.ready は SW が未登録/未起動のとき hang する可能性があるため、
+          // controller（現在アクティブなSW）にのみ fire-and-forget でメッセージ送信する。
+          // controller が未定義なら何もしない（キャッシュがそもそも無いため問題なし）。
+          if (typeof navigator !== 'undefined' && navigator.serviceWorker?.controller) {
+            navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHE' });
           }
           signOut({ callbackUrl: '/login' });
         }}
