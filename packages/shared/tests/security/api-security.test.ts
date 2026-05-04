@@ -3,7 +3,7 @@
  *
  * レートリミット、認証チェック、認可、セキュリティヘッダーをテストする。
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   InMemoryRateLimiter,
   RATE_LIMITS,
@@ -144,6 +144,12 @@ describe('セキュリティヘッダー検証', () => {
     expect(REQUIRED_CSP_DIRECTIVES).toContain('frame-ancestors none');
   });
 
+  it('CSPにobject-src none / base-uri self / form-action selfが含まれる', () => {
+    expect(REQUIRED_CSP_DIRECTIVES).toContain("object-src 'none'");
+    expect(REQUIRED_CSP_DIRECTIVES).toContain("base-uri 'self'");
+    expect(REQUIRED_CSP_DIRECTIVES).toContain("form-action 'self'");
+  });
+
   it('CSPにdefault-src selfが含まれる', () => {
     const hasDefaultSrc = REQUIRED_CSP_DIRECTIVES.some((d) => d.startsWith("default-src 'self'"));
     expect(hasDefaultSrc).toBe(true);
@@ -161,6 +167,12 @@ describe('セキュリティヘッダー検証', () => {
 });
 
 describe('buildCspHeader（nonce方式）', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+  });
+
   it('nonce未指定ならstrictなscript-src self のみ', () => {
     const csp = buildCspHeader();
     const scriptSrc = csp.split(';').find((d) => d.trim().startsWith('script-src'))!;
@@ -190,6 +202,11 @@ describe('buildCspHeader（nonce方式）', () => {
     const scriptSrc = withNonce.split(';').find((d) => d.trim().startsWith('script-src'));
     expect(scriptSrc).toBeDefined();
     expect(scriptSrc).not.toContain("'unsafe-inline'");
+  });
+
+  it('productionではupgrade-insecure-requestsを付与する', () => {
+    process.env.NODE_ENV = 'production';
+    expect(buildCspHeader('abc')).toContain('upgrade-insecure-requests');
   });
 });
 
