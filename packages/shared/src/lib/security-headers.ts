@@ -80,9 +80,19 @@ export function isOriginAllowed(origin: string | null): boolean {
   if (origin === null) return true;
   if (!origin) return false;
 
-  // WHY: 開発環境ではlocalhostを許可
+  // WHY: 開発環境では localhost / 127.0.0.1 / [::1] を許可。
+  // docker-compose で web を 127.0.0.1:3001 に bind しており、ブラウザが
+  // http://127.0.0.1:3001 でアクセスした場合に POST/PUT/PATCH/DELETE の
+  // Origin が 127.0.0.1 になるため、localhost と同様に許可する必要がある。
+  // production では ALLOWED_ORIGINS のみを参照し、ループバック許可は適用しない。
   if (typeof process !== 'undefined' && process.env.NODE_ENV === 'development') {
-    if (origin.startsWith('http://localhost:')) return true;
+    if (
+      origin.startsWith('http://localhost:') ||
+      origin.startsWith('http://127.0.0.1:') ||
+      origin.startsWith('http://[::1]:')
+    ) {
+      return true;
+    }
   }
 
   return ALLOWED_ORIGINS.includes(origin);
