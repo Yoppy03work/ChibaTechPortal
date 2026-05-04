@@ -14,23 +14,27 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { refreshTokenStore } from '@chibatech/db/src/refresh-token-store';
-import { createRefreshToken, REFRESH_TOKEN_EXPIRY } from '@chibatech/shared';
+import { createRefreshToken } from '@chibatech/shared';
+import { validateStateChangingRequest } from '@/lib/api-guard';
+import {
+  LEGACY_REFRESH_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+  clearRefreshTokenCookieOptions,
+  refreshTokenCookieOptions,
+} from '@/lib/auth-cookies';
 
 export const dynamic = 'force-dynamic';
 
-const REFRESH_TOKEN_COOKIE = 'refresh_token';
+export async function POST(request?: Request) {
+  if (request) {
+    const guard = validateStateChangingRequest(request);
+    if (guard) return guard;
+  }
 
-const CLEAR_COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
-  path: '/',
-  maxAge: 0,
-};
-
-export async function POST() {
   const cookieStore = await cookies();
-  const rawToken = cookieStore.get(REFRESH_TOKEN_COOKIE)?.value;
+  const rawToken =
+    cookieStore.get(REFRESH_TOKEN_COOKIE)?.value ??
+    cookieStore.get(LEGACY_REFRESH_TOKEN_COOKIE)?.value;
 
   if (!rawToken) {
     return NextResponse.json({ error: 'No refresh token' }, { status: 401 });
@@ -46,7 +50,7 @@ export async function POST() {
       { error: 'Token reuse detected, all sessions revoked' },
       { status: 403 }
     );
-    response.cookies.set(REFRESH_TOKEN_COOKIE, '', CLEAR_COOKIE_OPTIONS);
+    clearRefreshTokenCookies(response);
     return response;
   }
 
@@ -56,7 +60,7 @@ export async function POST() {
       { error: result.outcome === 'expired' ? 'Refresh token expired' : 'Invalid refresh token' },
       { status: 401 }
     );
-    response.cookies.set(REFRESH_TOKEN_COOKIE, '', CLEAR_COOKIE_OPTIONS);
+    clearRefreshTokenCookies(response);
     return response;
   }
 
@@ -65,12 +69,13 @@ export async function POST() {
   await refreshTokenStore.save(issue.record);
 
   const response = NextResponse.json({ success: true });
-  response.cookies.set(REFRESH_TOKEN_COOKIE, issue.rawToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    path: '/',
-    maxAge: REFRESH_TOKEN_EXPIRY,
-  });
+  response.cookies.set(REFRESH_TOKEN_COOKIE, issue.rawToken, refreshTokenCookieOptions());
   return response;
+}
+
+function clearRefreshTokenCookies(response: NextResponse) {
+  response.cookies.set(REFRESH_TOKEN_COOKIE, '', clearRefreshTokenCookieOptions());
+  if (REFRESH_TOKEN_COOKIE !== LEGACY_REFRESH_TOKEN_COOKIE) {
+    response.cookies.set(LEGACY_REFRESH_TOKEN_COOKIE, '', clearRefreshTokenCookieOptions());
+  }
 }

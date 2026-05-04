@@ -17,12 +17,14 @@ import {
   RATE_LIMITS,
   getClientIp,
   createRefreshToken,
-  REFRESH_TOKEN_EXPIRY,
 } from '@chibatech/shared';
 import { rateLimiter } from './rate-limiter';
 import { authConfig } from './auth.config';
-
-const REFRESH_TOKEN_COOKIE = 'refresh_token';
+import {
+  REFRESH_TOKEN_COOKIE,
+  refreshTokenCookieOptions,
+  clearRefreshTokenCookieOptions,
+} from './auth-cookies';
 
 export const {
   handlers,
@@ -105,13 +107,7 @@ export const {
       await refreshTokenStore.save(issue.record);
 
       const cookieStore = await cookies();
-      cookieStore.set(REFRESH_TOKEN_COOKIE, issue.rawToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: REFRESH_TOKEN_EXPIRY,
-      });
+      cookieStore.set(REFRESH_TOKEN_COOKIE, issue.rawToken, refreshTokenCookieOptions());
     },
 
     /**
@@ -130,13 +126,7 @@ export const {
       }
 
       const cookieStore = await cookies();
-      cookieStore.set(REFRESH_TOKEN_COOKIE, '', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 0,
-      });
+      cookieStore.set(REFRESH_TOKEN_COOKIE, '', clearRefreshTokenCookieOptions());
     },
   },
 });

@@ -17,6 +17,7 @@ import {
   RATE_LIMITS,
 } from '@chibatech/shared';
 import { rateLimiter } from '@/lib/rate-limiter';
+import { validateStateChangingRequest } from '@/lib/api-guard';
 
 // WHY: 認証情報に関わるため、キャッシュ方針を統一
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,9 @@ export const dynamic = 'force-dynamic';
 const encryptionService = createEncryptionService();
 
 export async function PUT(request: Request) {
+  const guard = validateStateChangingRequest(request, { requireJson: true });
+  if (guard) return guard;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -82,9 +86,9 @@ export async function PUT(request: Request) {
     });
 
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch {
     // WHY: エラーメッセージに認証情報が含まれないようにする
-    console.error('Failed to save credentials:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('Failed to save credentials');
     return NextResponse.json({ error: 'Failed to save credentials' }, { status: 500 });
   } finally {
     // WHY: 成功・失敗に関わらずマスターキーのBuffer参照を確実にゼロ化

@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { prisma } from '@chibatech/db';
+import { validateStateChangingRequest } from '@/lib/api-guard';
 
 // WHY: 個人データに関わるため、キャッシュ方針を統一
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,9 @@ const subscribeSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const guard = validateStateChangingRequest(request, { requireJson: true });
+  if (guard) return guard;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -65,6 +69,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const guard = validateStateChangingRequest(request, { requireJson: true });
+  if (guard) return guard;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
