@@ -20,6 +20,7 @@ import {
   LEGACY_REFRESH_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
   clearRefreshTokenCookieOptions,
+  refreshTokenCookieNamesToClear,
   refreshTokenCookieOptions,
 } from '@/lib/auth-cookies';
 
@@ -74,8 +75,10 @@ export async function POST(request?: Request) {
 }
 
 function clearRefreshTokenCookies(response: NextResponse) {
-  response.cookies.set(REFRESH_TOKEN_COOKIE, '', clearRefreshTokenCookieOptions());
-  if (REFRESH_TOKEN_COOKIE !== LEGACY_REFRESH_TOKEN_COOKIE) {
-    response.cookies.set(LEGACY_REFRESH_TOKEN_COOKIE, '', clearRefreshTokenCookieOptions());
+  // WHY: refreshTokenCookieNamesToClear() で signOut と同じ「新旧両方を必ず clear」
+  // ロジックに統一し、片方だけ消える経路を作らない。
+  const clearOptions = clearRefreshTokenCookieOptions();
+  for (const name of refreshTokenCookieNamesToClear()) {
+    response.cookies.set(name, '', clearOptions);
   }
 }

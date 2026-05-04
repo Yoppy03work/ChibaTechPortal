@@ -24,6 +24,7 @@ import {
   REFRESH_TOKEN_COOKIE,
   refreshTokenCookieOptions,
   clearRefreshTokenCookieOptions,
+  refreshTokenCookieNamesToClear,
 } from './auth-cookies';
 
 export const {
@@ -125,8 +126,14 @@ export const {
         await refreshTokenStore.revokeAllForUser(userId);
       }
 
+      // WHY: 本番デプロイで __Host-refresh_token に切り替えた直後は、クライアントに
+      // 旧 refresh_token cookie が残ったまま signOut が走るケースがある。新旧両方
+      // 必ず clear してログアウト後に旧 cookie が再利用される経路を断つ。
       const cookieStore = await cookies();
-      cookieStore.set(REFRESH_TOKEN_COOKIE, '', clearRefreshTokenCookieOptions());
+      const clearOptions = clearRefreshTokenCookieOptions();
+      for (const name of refreshTokenCookieNamesToClear()) {
+        cookieStore.set(name, '', clearOptions);
+      }
     },
   },
 });
