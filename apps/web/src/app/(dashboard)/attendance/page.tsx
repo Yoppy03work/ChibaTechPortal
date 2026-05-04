@@ -7,6 +7,7 @@
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { prisma } from '@chibatech/db';
+import { normalizeAttendanceSettings } from '@chibatech/shared';
 import { AttendanceSettings } from './attendance-settings';
 
 export default async function AttendancePage() {
@@ -18,9 +19,7 @@ export default async function AttendancePage() {
     select: { attendanceSettings: true },
   });
 
-  const settings = (user?.attendanceSettings as { autoAttend?: boolean } | null) ?? {
-    autoAttend: false,
-  };
+  const settings = normalizeAttendanceSettings(user?.attendanceSettings ?? null);
 
   // 直近7日の出席ログ
   const since = new Date();
@@ -41,8 +40,8 @@ export default async function AttendancePage() {
     <main className="mx-auto max-w-2xl space-y-6 p-4">
       <h1 className="text-lg font-bold text-[#1E3A5F]">出席管理</h1>
 
-      {/* 自動出席設定 */}
-      <AttendanceSettings initialAutoAttend={settings.autoAttend ?? false} />
+      {/* 出席モード設定 */}
+      <AttendanceSettings initialMode={settings.mode} />
 
       {/* 出席ログ */}
       <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
