@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@chibatech/db';
 import { notificationSettingsSchema } from '@chibatech/shared';
+import { validateStateChangingRequest } from '@/lib/api-guard';
 
 // WHY: 個人データを含むため、Next.jsのキャッシュを無効化
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,9 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const guard = validateStateChangingRequest(request, { requireJson: true });
+  if (guard) return guard;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

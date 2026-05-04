@@ -27,12 +27,33 @@ describe('isOriginAllowed', () => {
   it('開発環境ではlocalhostを許可する', () => {
     process.env.NODE_ENV = 'development';
     expect(isOriginAllowed('http://localhost:3000')).toBe(true);
+    expect(isOriginAllowed('http://localhost:3001')).toBe(true);
     expect(isOriginAllowed('http://localhost:8080')).toBe(true);
+  });
+
+  // WHY: docker-compose で web を 127.0.0.1:3001 に bind するため、
+  // ブラウザがそのまま 127.0.0.1 でアクセスすると Origin が
+  // http://127.0.0.1:3001 になる。localhost と同じ扱いで許可する必要がある。
+  it('開発環境では 127.0.0.1 を許可する', () => {
+    process.env.NODE_ENV = 'development';
+    expect(isOriginAllowed('http://127.0.0.1:3001')).toBe(true);
+    expect(isOriginAllowed('http://127.0.0.1:3000')).toBe(true);
+  });
+
+  it('開発環境では IPv6 ループバック [::1] を許可する', () => {
+    process.env.NODE_ENV = 'development';
+    expect(isOriginAllowed('http://[::1]:3001')).toBe(true);
   });
 
   it('本番環境ではlocalhostを拒否する', () => {
     process.env.NODE_ENV = 'production';
     expect(isOriginAllowed('http://localhost:3000')).toBe(false);
+  });
+
+  it('本番環境では 127.0.0.1 / [::1] も拒否する', () => {
+    process.env.NODE_ENV = 'production';
+    expect(isOriginAllowed('http://127.0.0.1:3001')).toBe(false);
+    expect(isOriginAllowed('http://[::1]:3001')).toBe(false);
   });
 
   it('空文字列のオリジンを拒否する', () => {

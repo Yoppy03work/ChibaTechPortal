@@ -8,6 +8,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@chibatech/db';
 import { registerSchema, RATE_LIMITS, getClientIp } from '@chibatech/shared';
 import { rateLimiter } from '@/lib/rate-limiter';
+import { validateStateChangingRequest } from '@/lib/api-guard';
 
 // WHY: bcryptのコストファクターは12が推奨（10は最低ライン）
 // WHY: 認証に関わるため、キャッシュ方針を統一
@@ -16,6 +17,9 @@ export const dynamic = 'force-dynamic';
 const BCRYPT_ROUNDS = 12;
 
 export async function POST(request: Request) {
+  const guard = validateStateChangingRequest(request, { requireJson: true });
+  if (guard) return guard;
+
   // WHY: 信頼できるプロキシチェーンからクライアントIPを抽出（偽装耐性あり）
   // IPが取得できない場合はIPベースリミットをスキップ（共有バケット問題を回避）
   const ip = getClientIp(request.headers);

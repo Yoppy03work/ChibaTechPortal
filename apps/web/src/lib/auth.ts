@@ -17,12 +17,15 @@ import {
   RATE_LIMITS,
   getClientIp,
   createRefreshToken,
-  REFRESH_TOKEN_EXPIRY,
 } from '@chibatech/shared';
 import { rateLimiter } from './rate-limiter';
 import { authConfig } from './auth.config';
-
-const REFRESH_TOKEN_COOKIE = 'refresh_token';
+import {
+  REFRESH_TOKEN_COOKIE,
+  refreshTokenCookieOptions,
+  clearRefreshTokenCookieOptions,
+  refreshTokenCookieNamesToClear,
+} from './auth-cookies';
 
 export const {
   handlers,
@@ -105,13 +108,7 @@ export const {
       await refreshTokenStore.save(issue.record);
 
       const cookieStore = await cookies();
-      cookieStore.set(REFRESH_TOKEN_COOKIE, issue.rawToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: REFRESH_TOKEN_EXPIRY,
-      });
+      cookieStore.set(REFRESH_TOKEN_COOKIE, issue.rawToken, refreshTokenCookieOptions());
     },
 
     /**
@@ -129,14 +126,14 @@ export const {
         await refreshTokenStore.revokeAllForUser(userId);
       }
 
+      // WHY: 本番デプロイで __Host-refresh_token に切り替えた直後は、クライアントに
+      // 旧 refresh_token cookie が残ったまま signOut が走るケースがある。新旧両方
+      // 必ず clear してログアウト後に旧 cookie が再利用される経路を断つ。
       const cookieStore = await cookies();
-      cookieStore.set(REFRESH_TOKEN_COOKIE, '', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 0,
-      });
+      const clearOptions = clearRefreshTokenCookieOptions();
+      for (const name of refreshTokenCookieNamesToClear()) {
+        cookieStore.set(name, '', clearOptions);
+      }
     },
   },
 });

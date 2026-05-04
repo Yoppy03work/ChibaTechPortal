@@ -6,14 +6,18 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@chibatech/db';
+import { validateStateChangingRequest } from '@/lib/api-guard';
 
 // WHY: 個人データに関わるため、キャッシュ方針を統一
 export const dynamic = 'force-dynamic';
 
 export async function PATCH(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const guard = validateStateChangingRequest(request);
+  if (guard) return guard;
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
