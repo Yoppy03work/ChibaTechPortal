@@ -6,6 +6,7 @@
  * 稼働時間は7:00〜22:00（設計書に基づく）。
  */
 import { prisma } from '@chibatech/db';
+import { normalizeAttendanceSettings } from '@chibatech/shared';
 import { scrapeQueue } from './scrape-job';
 import { attendanceQueue } from './attendance-job';
 
@@ -116,25 +117,23 @@ async function enqueueAttendanceJobs() {
     });
 
     for (const tt of timetables) {
-      // WHY: 自動出席がOFFのユーザーはスキップ
-      const settings = tt.user.attendanceSettings as { autoAttend?: boolean } | null;
-      if (settings && settings.autoAttend === false) continue;
+      // WHY: フェーズ0段階では Scheduler から自動送信は行わない。
+      // confirm/manual はそもそも対象外。auto は 6条件チェック + 監査ログが
+      // 実装される PR4 で解禁する（memory: feedback_attendance_auto_guard.md）。
+      // それまではユーザー設定が auto でもジョブ投入をブロックする安全装置として機能する。
+      const { mode } = normalizeAttendanceSettings(tt.user.attendanceSettings);
+      if (mode !== 'auto') continue;
 
-      // WHY: 認証情報がないユーザーはスキップ
-      if (!tt.user.encryptedCitCreds) continue;
-
-      // WHY: roomがnullの場合はスキップ（QR URLを構築できない）
-      if (!tt.room) continue;
-
-      // WHY: キューにはIDと教室情報のみ。認証情報はworker側でDB取得する
-      await attendanceQueue.add('attend', {
-        userId: tt.userId,
-        timetableId: tt.id,
-        roomId: tt.room,
-        className: tt.className,
-      });
-
-      console.log(`[scheduler] Attendance job: ${tt.className} (room ${tt.room}) for user ${tt.userId}`);
+      // TODO(PR4): 6条件チェックを通過したときだけ下記を実行する
+      //   if (!tt.user.encryptedCitCreds) continue;
+      //   if (!tt.room) continue;
+      //   await attendanceQueue.add('attend', {
+      //     userId: tt.userId, timetableId: tt.id, roomId: tt.room,
+      //     className: tt.className, method: mode,
+      //   });
+      console.log(
+        `[scheduler] auto mode is locked until PR4. skip user=${tt.userId} class=${tt.className}`
+      );
     }
   }
 }
