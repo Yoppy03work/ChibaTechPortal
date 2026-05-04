@@ -128,6 +128,7 @@ model AttendanceLog {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   timetable Timetable @relation(fields: [timetableId], references: [id])
 
+  @@unique([userId, timetableId, classDate, method])
   @@index([userId, classDate])
   @@map("attendance_logs")
 }
