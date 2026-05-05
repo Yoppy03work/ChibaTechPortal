@@ -111,6 +111,8 @@ export {
 
 export {
   type AttendanceAutoGuardInput,
+  type AttendanceAutoGuardPreNetworkInput,
   type AttendanceAutoGuardResult,
   evaluateAttendanceAutoGuard,
+  evaluateAttendanceAutoGuardPreNetwork,
 } from './lib/attendance-auto-guard';
