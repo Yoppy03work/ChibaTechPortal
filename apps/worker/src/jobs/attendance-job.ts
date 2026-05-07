@@ -12,6 +12,7 @@
  */
 import { Worker, Queue } from 'bullmq';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { bullmqConnection } from '../lib/redis';
 import { prisma } from '@chibatech/db';
 import { createAttendanceAdapter } from '../scrapers/adapter-factory';
@@ -23,10 +24,12 @@ import {
   normalizeAttendanceSettings,
   evaluateAttendanceAutoGuard,
   evaluateAttendanceAutoGuardPreNetwork,
+  toAttendanceAuditLogCreateData,
 } from '@chibatech/shared';
 import type {
   AttendanceMode,
   AttendanceAutoGuardPreNetworkInput,
+  AttendanceAuditLogInput,
 } from '@chibatech/shared';
 
 export const ATTENDANCE_QUEUE_NAME = 'attendance';
@@ -103,6 +106,17 @@ export async function processAttendanceJob(
   });
 
   if (!timetable) {
+    // WHY: timetable 不在は ガード以前の段階で進行不可。append-only 監査ログに
+    // blocked として記録する (AttendanceLog には書けないので audit のみ)。
+    await recordAudit({
+      userId,
+      phase: 'blocked',
+      timetableId,
+      classDate,
+      method,
+      reason: 'timetable not found',
+      jobId: jobIdString(job.id),
+    });
     console.warn(`[attendance] timetable not found for job id=${job.id}`);
     return;
   }
@@ -143,6 +157,15 @@ export async function processAttendanceJob(
   if (!preGuard.allowed) {
     const reason = sanitizeExternalText(preGuard.reason);
     await saveLog(userId, timetableId, 'skipped', method, reason, classDate);
+    await recordAudit({
+      userId,
+      phase: 'skipped',
+      timetableId,
+      classDate,
+      method,
+      reason,
+      jobId: jobIdString(job.id),
+    });
     await notifyUser(userId, displayClassName, false, reason);
     console.warn(`[attendance] skipped (pre-network) job id=${job.id}: ${reason}`);
     return;
@@ -162,6 +185,18 @@ export async function processAttendanceJob(
   if (!guard.allowed) {
     const reason = sanitizeExternalText(guard.reason);
     await saveLog(userId, timetableId, 'skipped', method, reason, classDate);
+    await recordAudit({
+      userId,
+      phase: 'skipped',
+      timetableId,
+      classDate,
+      method,
+      reason,
+      jobId: jobIdString(job.id),
+      // WHY: post-network reject (healthCheck 後) は campusReachable=false が
+      // 主因。集計時に pre-network reject と区別できるよう metadata に残す
+      metadata: { campusReachable: healthy, stage: 'post_network' },
+    });
     await notifyUser(userId, displayClassName, false, reason);
     console.warn(`[attendance] skipped job id=${job.id}: ${reason}`);
     return;
@@ -169,8 +204,18 @@ export async function processAttendanceJob(
 
   // 7. 認証情報チェック
   if (!timetable.user.encryptedCitCreds) {
-    await saveLog(userId, timetableId, 'failed', method, '認証情報が未登録です', classDate);
-    await notifyUser(userId, displayClassName, false, '認証情報が未登録です');
+    const reason = '認証情報が未登録です';
+    await saveLog(userId, timetableId, 'failed', method, reason, classDate);
+    await recordAudit({
+      userId,
+      phase: 'blocked',
+      timetableId,
+      classDate,
+      method,
+      reason,
+      jobId: jobIdString(job.id),
+    });
+    await notifyUser(userId, displayClassName, false, reason);
     return;
   }
 
@@ -182,10 +227,53 @@ export async function processAttendanceJob(
       Buffer.from(timetable.user.encryptedCitCreds),
       masterKey,
       async (creds) => {
-        const result = await adapter.attend(creds.userId, creds.password, roomId);
+        // WHY: 外部システムへの実 HTTP 直前の監査ログ。auto 解禁条件の
+        // 「送信前監査ログ」要件を満たす。creds 自体はログに含めない。
+        await recordAudit({
+          userId,
+          phase: 'pre_attempt',
+          timetableId,
+          classDate,
+          method,
+          jobId: jobIdString(job.id),
+        });
+
+        let result;
+        try {
+          result = await adapter.attend(creds.userId, creds.password, roomId);
+        } catch (err) {
+          // WHY: adapter が throw した場合も「送信後監査ログ」を残す。
+          // 例外メッセージはサニタイズしてから保存 (外部 HTML が含まれうるため)
+          const errMessage =
+            err instanceof Error ? sanitizeExternalText(err.message) : 'unknown error';
+          await recordAudit({
+            userId,
+            phase: 'post_attempt',
+            timetableId,
+            classDate,
+            method,
+            outcome: 'failed',
+            reason: errMessage,
+            jobId: jobIdString(job.id),
+          });
+          throw err;
+        }
 
         // WHY: 外部HTML由来のメッセージはサニタイズしてからDB保存
         const sanitizedMessage = result.message ? sanitizeExternalText(result.message) : undefined;
+
+        // WHY: 送信後監査ログ。outcome=success/failed と sanitized message を残す
+        await recordAudit({
+          userId,
+          phase: 'post_attempt',
+          timetableId,
+          classDate,
+          method,
+          outcome: result.success ? 'success' : 'failed',
+          reason: result.success ? null : (sanitizedMessage ?? null),
+          jobId: jobIdString(job.id),
+          metadata: sanitizedMessage ? { sanitizedMessage } : null,
+        });
 
         // WHY: success / 復帰系では errorDetail を null clear する。Prisma は
         // undefined を「更新しない」として扱うため、明示的に null を渡さないと
@@ -206,6 +294,52 @@ export async function processAttendanceJob(
     );
   } finally {
     masterKey.fill(0);
+  }
+}
+
+/**
+ * BullMQ Job ID を文字列に正規化する (string | number | undefined → string | null)。
+ *
+ * WHY: AttendanceAuditLog の jobId は string | null 想定だが、BullMQ の Job.id は
+ * Job のオプションによって number になる場合もある。監査ログでは検索用に
+ * string で一貫させる。
+ */
+function jobIdString(id: string | number | undefined): string | null {
+  if (id === undefined) return null;
+  return String(id);
+}
+
+/**
+ * 監査ログを書き込む。書き込み失敗で本処理を止めない (best-effort)。
+ *
+ * WHY: 監査ログは append-only で create のみ呼ぶ。DB 障害時に本ジョブ全体を
+ * 失敗にすると BullMQ がリトライして二重処理になる可能性があるため、
+ * 監査側の失敗は console.error でのみ通知して続行する。逆に成功した
+ * adapter.attend() を audit が原因で取り消すことはしない (副作用は外部に出ている)。
+ */
+async function recordAudit(input: AttendanceAuditLogInput): Promise<void> {
+  try {
+    const data = toAttendanceAuditLogCreateData(input);
+    // WHY: Prisma の Json? カラムは TypeScript レベルで `null` の直接代入を
+    // 許さず、明示的な NULL 書き込みには Prisma.JsonNull が必要。また
+    // Record<string, unknown> も InputJsonValue として直接受け付けないため
+    // ここでキャストする。shared 側は Prisma 非依存を維持するため、最終変換は
+    // worker 側で行う。
+    const metadata: Prisma.InputJsonValue | typeof Prisma.JsonNull = data.metadata
+      ? (data.metadata as Prisma.InputJsonValue)
+      : Prisma.JsonNull;
+
+    await prisma.attendanceAuditLog.create({
+      data: {
+        ...data,
+        metadata,
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown error';
+    console.error(
+      `[attendance:audit] failed to record audit log (phase=${input.phase}): ${message}`
+    );
   }
 }
 
