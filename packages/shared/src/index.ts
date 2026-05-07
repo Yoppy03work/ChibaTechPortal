@@ -125,3 +125,14 @@ export {
   auditOutcomeSchema,
   toAttendanceAuditLogCreateData,
 } from './lib/attendance-audit';
+
+export {
+  type AttendanceQrParseResult,
+  parseAttendanceQrUrl,
+} from './lib/attendance-qr';
+
+export {
+  type AttendanceTargetTimetable,
+  type AttendanceTargetResolution,
+  resolveAttendanceTarget,
+} from './lib/attendance-target';
