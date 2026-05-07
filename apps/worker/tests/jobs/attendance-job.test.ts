@@ -250,20 +250,37 @@ describe('processAttendanceJob — 外部システム実アクセス禁止', () 
 // skip ログと通知が記録されること (実送信は走っていない経路)
 // ============================================================
 describe('processAttendanceJob — pre-network reject 時のログ/通知', () => {
-  it('pre-network reject で attendanceLog に skipped が記録される', async () => {
+  it('pre-network reject で attendanceLog に skipped が reason 文字列付きで記録される', async () => {
     delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
     timetableFindUnique.mockResolvedValue(timetableRow());
     const adapter = makeAdapter();
 
     await processAttendanceJob({ id: 'j9', data: validJobData() }, adapter);
 
-    // create または updateMany のいずれかで status='skipped' が書かれる
+    // create で status='skipped' が書かれる
     const skippedCreate = attendanceLogCreate.mock.calls.find(
       (c) => (c[0] as { data: { status: string } }).data.status === 'skipped'
     );
     expect(skippedCreate).toBeDefined();
 
+    // WHY: errorDetail は string | null。skipped 時は guard reason が
+    // 文字列として保存される (success 時は明示的に null clear される対称設計)
+    const data = skippedCreate![0] as { data: { errorDetail: unknown } };
+    expect(typeof data.data.errorDetail).toBe('string');
+    expect((data.data.errorDetail as string).length).toBeGreaterThan(0);
+
     // ユーザー通知が走る
     expect(notifyAdd).toHaveBeenCalledTimes(1);
   });
+
+  // WHY: success path で errorDetail が undefined のままだと Prisma が
+  // 「更新しない」と解釈し、過去 failed の errorDetail が残る。呼び出し側で
+  // 明示的に null を渡し、updateMany / create の data.errorDetail に null が
+  // セットされることを保証する。
+  // pre-network ガードは現状 qrSessionValid=false 固定で必ず reject するため、
+  // success path 自体はこのテストでは到達しない。null clear の挙動は
+  // saveLog のシグネチャ (string | null = null) と呼び出し側の
+  // `result.success ? null : sanitizedMessage ?? null` で保証している。
+  // ここでは reject 経路で errorDetail が non-null 文字列であることを固定し、
+  // success 時に null になるべき箇所と区別がつくことを示す。
 });

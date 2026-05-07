@@ -187,12 +187,15 @@ export async function processAttendanceJob(
         // WHY: 外部HTML由来のメッセージはサニタイズしてからDB保存
         const sanitizedMessage = result.message ? sanitizeExternalText(result.message) : undefined;
 
+        // WHY: success / 復帰系では errorDetail を null clear する。Prisma は
+        // undefined を「更新しない」として扱うため、明示的に null を渡さないと
+        // 過去 failed の errorDetail がリトライ成功後も残ってしまう。
         await saveLog(
           userId,
           timetableId,
           result.success ? 'success' : 'failed',
           method,
-          result.success ? undefined : sanitizedMessage,
+          result.success ? null : (sanitizedMessage ?? null),
           classDate
         );
 
@@ -225,12 +228,21 @@ export function startAttendanceWorker() {
   return worker;
 }
 
+/**
+ * AttendanceLog を upsert する。
+ *
+ * WHY: errorDetail を `string | null` で受け取り、未指定 (= null) なら明示的に
+ * null clear する。Prisma は `data: { errorDetail: undefined }` を「更新しない」
+ * として扱うため、success / skipped の path で undefined を渡すと過去の
+ * failed errorDetail が残り続ける。これを防ぐため呼び出し側もこの関数も
+ * null を明示する。
+ */
 async function saveLog(
   userId: string,
   timetableId: string,
   status: string,
   method: AttendanceMode,
-  errorDetail?: string,
+  errorDetail: string | null = null,
   classDate = toClassDate(new Date())
 ) {
   const updated = await prisma.attendanceLog.updateMany({
