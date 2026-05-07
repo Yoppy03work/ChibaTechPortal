@@ -49,13 +49,23 @@ const PERIOD_START_TIMES: Record<number, { hour: number; minute: number }> = {
 
 const ATTENDANCE_LEAD_MINUTES = 5;
 
+// WHY: Scheduler のキック時刻と Worker の処理時刻には数秒〜数十秒のラグがあり、
+// BullMQ のリトライや遅延配送でさらにズレることがある。完全一致 (==) で判定すると
+// 1 分でも遅れた瞬間に reject されてしまうため、短い許容幅を持たせる。
+// 値は ATTENDANCE_LEAD_MINUTES (5 分前狙い) より十分小さく取り、授業開始
+// 5 分前の前後 ±2 分 (= 7 分前 〜 3 分前の範囲) のみ許容する。
+const ATTENDANCE_WINDOW_TOLERANCE_MINUTES = 2;
+
 function isExpectedAttendanceWindow(input: AttendanceAutoGuardPreNetworkInput): boolean {
   const start = PERIOD_START_TIMES[input.period];
   if (!start) return false;
 
   const currentMinutes = input.now.getHours() * 60 + input.now.getMinutes();
   const targetMinutes = start.hour * 60 + start.minute - ATTENDANCE_LEAD_MINUTES;
-  return input.now.getDay() === input.dayOfWeek && currentMinutes === targetMinutes;
+  return (
+    input.now.getDay() === input.dayOfWeek &&
+    Math.abs(currentMinutes - targetMinutes) <= ATTENDANCE_WINDOW_TOLERANCE_MINUTES
+  );
 }
 
 /**

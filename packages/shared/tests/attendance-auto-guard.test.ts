@@ -67,12 +67,35 @@ describe('evaluateAttendanceAutoGuard', () => {
     expect(result.allowed).toBe(false);
   });
 
-  it('授業開始5分前の対象曜日/時限でなければ拒否する', () => {
+  it('授業開始5分前のターゲットから ±2 分を超える時刻は拒否する', () => {
+    // WHY: 1 限 9:30 開始 - 5 分 = 9:25 がターゲット。±2 分の許容幅外 (9:22 や 9:28) は reject
+    const tooEarly = evaluateAttendanceAutoGuard({
+      ...validInput(),
+      now: new Date(2026, 4, 4, 9, 22, 0),
+    });
+    expect(tooEarly.allowed).toBe(false);
+
+    const tooLate = evaluateAttendanceAutoGuard({
+      ...validInput(),
+      now: new Date(2026, 4, 4, 9, 28, 0),
+    });
+    expect(tooLate.allowed).toBe(false);
+  });
+
+  // WHY: Scheduler / BullMQ のラグで ±1〜2 分ズレても reject せず、安定して
+  // ジョブを処理できるようにする許容幅。ターゲット (9:25) ±2 分 = 9:23〜9:27
+  it.each([
+    ['ターゲット完全一致', 9, 25],
+    ['ターゲット -1 分', 9, 24],
+    ['ターゲット +1 分', 9, 26],
+    ['ターゲット -2 分 (境界)', 9, 23],
+    ['ターゲット +2 分 (境界)', 9, 27],
+  ])('授業開始 5 分前 ±2 分の範囲 (%s = %d:%d) は許可する', (_label, hour, minute) => {
     const result = evaluateAttendanceAutoGuard({
       ...validInput(),
-      now: new Date(2026, 4, 4, 9, 24, 0),
+      now: new Date(2026, 4, 4, hour, minute, 0),
     });
-    expect(result.allowed).toBe(false);
+    expect(result).toEqual({ allowed: true });
   });
 
   it('CIT Wi-Fi 到達性がなければ拒否する', () => {
