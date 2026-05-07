@@ -45,16 +45,28 @@ export const REQUIRED_CSP_DIRECTIVES: string[] = [
  * 生成し `script-src 'self' 'nonce-XXX' 'strict-dynamic'` を発行することで、
  * `'unsafe-inline'` を使わずに Next.js のスクリプトを許可する。
  *
+ * 開発時のみ `'unsafe-eval'` を追加する。Next.js 16 (Turbopack) の dev runtime
+ * と React の DevTools 用 callstack 再構築が eval を要求するため。React は
+ * production では eval を使わないので、production CSP には影響しない。
+ *
  * @param nonce - middleware で生成された base64 nonce。未指定時は strict 設定（テスト用途）
  */
 export function buildCspHeader(nonce?: string): string {
+  const isProduction =
+    typeof process !== 'undefined' && process.env.NODE_ENV === 'production';
+
   const directives = REQUIRED_CSP_DIRECTIVES.map((d) => {
     if (!d.startsWith('script-src')) return d;
-    return nonce
+
+    const base = nonce
       ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
       : "script-src 'self'";
+    // WHY: Next.js dev (Turbopack) と React DevTools callstack 再構築が eval を
+    // 必要とする。production には付与しない (React が production で eval を呼ばない)。
+    return isProduction ? base : `${base} 'unsafe-eval'`;
   });
-  if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production') {
+
+  if (isProduction) {
     directives.push('upgrade-insecure-requests');
   }
   return directives.join('; ');
