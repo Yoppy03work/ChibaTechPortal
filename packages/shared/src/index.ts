@@ -100,3 +100,19 @@ export {
   ScraperError,
   ScraperLoginError,
 } from './lib/scraper-adapter';
+
+export {
+  type AttendanceSettings,
+  attendanceModeSchema,
+  attendanceSettingsSchema,
+  normalizeAttendanceSettings,
+  DEFAULT_ATTENDANCE_MODE,
+} from './lib/attendance-settings';
+
+export {
+  type AttendanceAutoGuardInput,
+  type AttendanceAutoGuardPreNetworkInput,
+  type AttendanceAutoGuardResult,
+  evaluateAttendanceAutoGuard,
+  evaluateAttendanceAutoGuardPreNetwork,
+} from './lib/attendance-auto-guard';
