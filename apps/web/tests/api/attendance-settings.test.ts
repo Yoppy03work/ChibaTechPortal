@@ -53,11 +53,13 @@ describe('GET /api/attendance/settings', () => {
     expect(await res.json()).toEqual({ mode: 'manual' });
   });
 
-  it('旧形式 { autoAttend: true } → { mode: "auto" }', async () => {
+  it('旧形式 { autoAttend: true } → { mode: "confirm" } (auto に昇格させない)', async () => {
+    // WHY: 旧 UI の「自動出席 ON」を新 mode='auto' へ暗黙昇格させない。
+    // auto は 6 条件ガード前提で旧 boolean とは別物なので、安全側 (confirm) に倒す
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
     findUnique.mockResolvedValue({ attendanceSettings: { autoAttend: true } });
     const res = await GET();
-    expect(await res.json()).toEqual({ mode: 'auto' });
+    expect(await res.json()).toEqual({ mode: 'confirm' });
   });
 
   it('旧形式 { autoAttend: false } → { mode: "confirm" }', async () => {

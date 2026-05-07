@@ -15,9 +15,15 @@ describe('normalizeAttendanceSettings', () => {
     });
   });
 
-  describe('旧形式 { autoAttend } を変換する', () => {
-    it('autoAttend=true → mode=auto', () => {
-      expect(normalizeAttendanceSettings({ autoAttend: true })).toEqual({ mode: 'auto' });
+  describe('旧形式 { autoAttend } は true/false どちらもデフォルト (confirm) に倒す', () => {
+    // WHY: 旧 boolean フラグから新 3 モード設計へ移行する際、autoAttend=true の
+    // ユーザーを暗黙的に mode='auto' へ昇格させない。auto は 6 条件ガード前提で、
+    // 旧 UI の「自動出席 ON」とはセマンティクスが異なる。安全側 (confirm) に倒し、
+    // auto を選び直したいユーザーは新 UI で明示的に選択する (現状は disabled)。
+    it('autoAttend=true → mode=デフォルト (auto に昇格させない)', () => {
+      expect(normalizeAttendanceSettings({ autoAttend: true })).toEqual({
+        mode: DEFAULT_ATTENDANCE_MODE,
+      });
     });
 
     it('autoAttend=false → mode=デフォルト', () => {
@@ -56,10 +62,12 @@ describe('normalizeAttendanceSettings', () => {
       ).toEqual({ mode: 'manual' });
     });
 
-    it('mode が不正なら旧形式 autoAttend にフォールバック', () => {
+    it('mode が不正なら旧形式 autoAttend にフォールバックし、true でもデフォルトに倒す', () => {
+      // WHY: autoAttend=true 経路でも mode='auto' に暗黙昇格させないルールは、
+      // mode が不正値で fallback する場合も同じく適用する
       expect(
         normalizeAttendanceSettings({ mode: 'invalid', autoAttend: true })
-      ).toEqual({ mode: 'auto' });
+      ).toEqual({ mode: DEFAULT_ATTENDANCE_MODE });
     });
   });
 

@@ -31,9 +31,17 @@ export const DEFAULT_ATTENDANCE_MODE: AttendanceMode = 'confirm';
  *
  * 互換ルール:
  *   - 新形式 `{ mode: 'manual' | 'confirm' | 'auto' }` → そのまま返す
- *   - 旧形式 `{ autoAttend: true }` → `{ mode: 'auto' }`
- *   - 旧形式 `{ autoAttend: false }` または null/undefined → `{ mode: DEFAULT }`
- *   - 不正値・壊れた JSON → `{ mode: DEFAULT }`（throw しない）
+ *   - 旧形式 `{ autoAttend: true | false }` → `{ mode: DEFAULT }` (= confirm)
+ *   - null / undefined / 不正値 → `{ mode: DEFAULT }`（throw しない）
+ *
+ * WHY: 旧 boolean フラグから新 3 モード設計への移行で、`autoAttend=true` の
+ * 既存ユーザーを暗黙的に `mode: 'auto'` に昇格させるのは危険。
+ *   - auto は 6 条件ガード + 監査ログ + 実地検証が揃った後にだけ解禁する
+ *   - 旧 UI の「自動出席 ON」は新 UI の「auto」とはセマンティクスが異なる
+ *     (旧は単純な boolean、新は 6 条件付きの auto)
+ *   - ユーザーが明示的に 3 択 UI で auto を選んだ時だけ mode='auto' とする
+ * よって旧形式は true / false どちらも DEFAULT (= confirm) に倒す。auto を
+ * 選び直したいユーザーは新 UI で再選択する (現状は disabled 表示)。
  */
 export function normalizeAttendanceSettings(raw: unknown): AttendanceSettings {
   // 1. 新形式として通るか
@@ -42,10 +50,10 @@ export function normalizeAttendanceSettings(raw: unknown): AttendanceSettings {
     return parsedNew.data;
   }
 
-  // 2. 旧形式 { autoAttend: boolean } との互換
+  // 2. 旧形式 { autoAttend: boolean } は true / false どちらも DEFAULT に倒す
+  // WHY: 暗黙の auto 昇格を防ぐため、true でも DEFAULT (confirm) に統一する
   if (raw && typeof raw === 'object' && 'autoAttend' in raw) {
-    const autoAttend = (raw as { autoAttend?: unknown }).autoAttend;
-    return { mode: autoAttend === true ? 'auto' : DEFAULT_ATTENDANCE_MODE };
+    return { mode: DEFAULT_ATTENDANCE_MODE };
   }
 
   // 3. null / undefined / 不正値 → デフォルト
