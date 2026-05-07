@@ -173,12 +173,17 @@ describe('buildCspHeader（nonce方式）', () => {
     process.env.NODE_ENV = originalNodeEnv;
   });
 
-  it('nonce未指定ならstrictなscript-src self のみ', () => {
+  it('nonce未指定ならscript-src selfベースで nonce/unsafe-inline は付かない', () => {
+    // WHY: production では 'self' のみ。development では Next.js dev のため
+    // 'unsafe-eval' が末尾に付く。XSS 緩和の本旨は nonce/unsafe-inline が
+    // 入らないことなので、それを固定する。
+    process.env.NODE_ENV = 'production';
     const csp = buildCspHeader();
     const scriptSrc = csp.split(';').find((d) => d.trim().startsWith('script-src'))!;
     expect(scriptSrc.trim()).toBe("script-src 'self'");
     expect(scriptSrc).not.toContain('nonce');
-    expect(scriptSrc).not.toContain('unsafe-inline');
+    expect(scriptSrc).not.toContain("'unsafe-inline'");
+    expect(scriptSrc).not.toContain("'unsafe-eval'");
   });
 
   it('nonce指定時はscript-src selfに加えnonceとstrict-dynamicを発行', () => {
@@ -207,6 +212,33 @@ describe('buildCspHeader（nonce方式）', () => {
   it('productionではupgrade-insecure-requestsを付与する', () => {
     process.env.NODE_ENV = 'production';
     expect(buildCspHeader('abc')).toContain('upgrade-insecure-requests');
+  });
+
+  // WHY: Next.js 16 (Turbopack) の dev runtime と React DevTools callstack
+  // 再構築が eval を要求する。production では React が eval を呼ばないので
+  // 付与しない (XSS 緩和を維持)。
+  it('developmentではscript-srcに unsafe-eval を付与する (nonce あり)', () => {
+    process.env.NODE_ENV = 'development';
+    const csp = buildCspHeader('abc');
+    const scriptSrc = csp.split(';').find((d) => d.trim().startsWith('script-src'))!;
+    expect(scriptSrc).toContain("'unsafe-eval'");
+    expect(scriptSrc).toContain("'nonce-abc'");
+    expect(scriptSrc).toContain("'strict-dynamic'");
+  });
+
+  it('developmentではscript-srcに unsafe-eval を付与する (nonce なし)', () => {
+    process.env.NODE_ENV = 'development';
+    const csp = buildCspHeader();
+    const scriptSrc = csp.split(';').find((d) => d.trim().startsWith('script-src'))!;
+    expect(scriptSrc).toContain("'unsafe-eval'");
+    expect(scriptSrc).toContain("'self'");
+  });
+
+  it('productionではscript-srcに unsafe-eval を付与しない (XSS 緩和を維持)', () => {
+    process.env.NODE_ENV = 'production';
+    const csp = buildCspHeader('abc');
+    const scriptSrc = csp.split(';').find((d) => d.trim().startsWith('script-src'))!;
+    expect(scriptSrc).not.toContain("'unsafe-eval'");
   });
 });
 
