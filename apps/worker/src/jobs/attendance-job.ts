@@ -108,7 +108,7 @@ export async function processAttendanceJob(
   if (!timetable) {
     // WHY: timetable 不在は ガード以前の段階で進行不可。append-only 監査ログに
     // blocked として記録する (AttendanceLog には書けないので audit のみ)。
-    await recordAudit({
+    await recordAuditBestEffort({
       userId,
       phase: 'blocked',
       timetableId,
@@ -157,7 +157,7 @@ export async function processAttendanceJob(
   if (!preGuard.allowed) {
     const reason = sanitizeExternalText(preGuard.reason);
     await saveLog(userId, timetableId, 'skipped', method, reason, classDate);
-    await recordAudit({
+    await recordAuditBestEffort({
       userId,
       phase: 'skipped',
       timetableId,
@@ -185,7 +185,7 @@ export async function processAttendanceJob(
   if (!guard.allowed) {
     const reason = sanitizeExternalText(guard.reason);
     await saveLog(userId, timetableId, 'skipped', method, reason, classDate);
-    await recordAudit({
+    await recordAuditBestEffort({
       userId,
       phase: 'skipped',
       timetableId,
@@ -206,7 +206,7 @@ export async function processAttendanceJob(
   if (!timetable.user.encryptedCitCreds) {
     const reason = '認証情報が未登録です';
     await saveLog(userId, timetableId, 'failed', method, reason, classDate);
-    await recordAudit({
+    await recordAuditBestEffort({
       userId,
       phase: 'blocked',
       timetableId,
@@ -227,9 +227,12 @@ export async function processAttendanceJob(
       Buffer.from(timetable.user.encryptedCitCreds),
       masterKey,
       async (creds) => {
-        // WHY: 外部システムへの実 HTTP 直前の監査ログ。auto 解禁条件の
-        // 「送信前監査ログ」要件を満たす。creds 自体はログに含めない。
-        await recordAudit({
+        // WHY: 外部システムへの実 HTTP 直前の監査ログ。auto 解禁条件 4 の
+        // 「送信前の監査ログが残る」を満たすため、ここは **必須記録** で扱う。
+        // 失敗した場合は recordAuditRequired が throw し、adapter.attend() に
+        // 到達しない (BullMQ がジョブを失敗扱いにし、リトライ時に監査込みで
+        // 再実行される)。creds 自体はログに含めない。
+        await recordAuditRequired({
           userId,
           phase: 'pre_attempt',
           timetableId,
@@ -246,7 +249,7 @@ export async function processAttendanceJob(
           // 例外メッセージはサニタイズしてから保存 (外部 HTML が含まれうるため)
           const errMessage =
             err instanceof Error ? sanitizeExternalText(err.message) : 'unknown error';
-          await recordAudit({
+          await recordAuditBestEffort({
             userId,
             phase: 'post_attempt',
             timetableId,
@@ -263,7 +266,7 @@ export async function processAttendanceJob(
         const sanitizedMessage = result.message ? sanitizeExternalText(result.message) : undefined;
 
         // WHY: 送信後監査ログ。outcome=success/failed と sanitized message を残す
-        await recordAudit({
+        await recordAuditBestEffort({
           userId,
           phase: 'post_attempt',
           timetableId,
@@ -310,31 +313,51 @@ function jobIdString(id: string | number | undefined): string | null {
 }
 
 /**
- * 監査ログを書き込む。書き込み失敗で本処理を止めない (best-effort)。
+ * 監査ログを書き込む (必須記録)。書き込み失敗時は例外を投げる。
  *
- * WHY: 監査ログは append-only で create のみ呼ぶ。DB 障害時に本ジョブ全体を
- * 失敗にすると BullMQ がリトライして二重処理になる可能性があるため、
- * 監査側の失敗は console.error でのみ通知して続行する。逆に成功した
- * adapter.attend() を audit が原因で取り消すことはしない (副作用は外部に出ている)。
+ * WHY: pre_attempt は「外部システムへ実 HTTP を出す直前」の記録なので、
+ * これに失敗したまま adapter.attend() に進ませると「監査ログが残らない送信」が
+ * 発生し、出席 auto 解禁条件 4「送信前・送信後・skip/block 理由を残せる」を
+ * 満たさなくなる。監査 DB 障害時は外部送信もスキップする (BullMQ がジョブを
+ * 失敗扱いにし、リトライで監査込みの再実行を期待する) のが安全側の挙動。
+ *
+ * post_attempt 用には `recordAuditBestEffort` を使うこと (送信後は副作用を
+ * 取り消せないため失敗時に throw しても無意味)。
  */
-async function recordAudit(input: AttendanceAuditLogInput): Promise<void> {
-  try {
-    const data = toAttendanceAuditLogCreateData(input);
-    // WHY: Prisma の Json? カラムは TypeScript レベルで `null` の直接代入を
-    // 許さず、明示的な NULL 書き込みには Prisma.JsonNull が必要。また
-    // Record<string, unknown> も InputJsonValue として直接受け付けないため
-    // ここでキャストする。shared 側は Prisma 非依存を維持するため、最終変換は
-    // worker 側で行う。
-    const metadata: Prisma.InputJsonValue | typeof Prisma.JsonNull = data.metadata
-      ? (data.metadata as Prisma.InputJsonValue)
-      : Prisma.JsonNull;
+export async function recordAuditRequired(input: AttendanceAuditLogInput): Promise<void> {
+  const data = toAttendanceAuditLogCreateData(input);
+  // WHY: Prisma の Json? カラムは TypeScript レベルで `null` の直接代入を
+  // 許さず、明示的な NULL 書き込みには Prisma.JsonNull が必要。また
+  // Record<string, unknown> も InputJsonValue として直接受け付けないため
+  // ここでキャストする。shared 側は Prisma 非依存を維持するため、最終変換は
+  // worker 側で行う。
+  const metadata: Prisma.InputJsonValue | typeof Prisma.JsonNull = data.metadata
+    ? (data.metadata as Prisma.InputJsonValue)
+    : Prisma.JsonNull;
 
-    await prisma.attendanceAuditLog.create({
-      data: {
-        ...data,
-        metadata,
-      },
-    });
+  await prisma.attendanceAuditLog.create({
+    data: {
+      ...data,
+      metadata,
+    },
+  });
+}
+
+/**
+ * 監査ログを書き込む (best-effort)。書き込み失敗時は console.error のみで処理を続行する。
+ *
+ * WHY: 以下のケースで使う:
+ *   - post_attempt: adapter.attend() の戻り値/例外を受けて呼ばれる。外部送信は
+ *     既に走っているので、ここで throw しても副作用は取り消せない。記録漏れは
+ *     ログのみで通知し、本ジョブは続行する。
+ *   - skipped / blocked: 外部送信を伴わないため、記録漏れがあっても二次被害なし。
+ *     監査用途でログには残すが、最重要は AttendanceLog 側の記録。
+ *
+ * pre_attempt には使わないこと (recordAuditRequired を使う)。
+ */
+async function recordAuditBestEffort(input: AttendanceAuditLogInput): Promise<void> {
+  try {
+    await recordAuditRequired(input);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error';
     console.error(
