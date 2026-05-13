@@ -10,24 +10,25 @@ datasource db {
 // --- ユーザー ---
 
 model User {
-  id           String   @id @default(uuid())
-  studentId    String   @unique @map("student_id")
-  email        String
-  passwordHash String   @map("password_hash")
+  id                   String   @id @default(uuid())
+  studentId            String   @unique @map("student_id")
+  email                String
+  passwordHash         String   @map("password_hash")
   // WHY: 認証情報はAES-256-GCMで暗号化して保存。平文は絶対にDBに入れない
-  encryptedCitCreds   Bytes?   @map("encrypted_cit_creds")
-  encryptedManabaCreds Bytes?  @map("encrypted_manaba_creds")
-  notificationSettings Json?   @map("notification_settings")
-  attendanceSettings   Json?   @map("attendance_settings")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  encryptedCitCreds    Bytes?   @map("encrypted_cit_creds")
+  encryptedManabaCreds Bytes?   @map("encrypted_manaba_creds")
+  notificationSettings Json?    @map("notification_settings")
+  attendanceSettings   Json?    @map("attendance_settings")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
-  pushSubscriptions PushSubscription[]
-  timetable         Timetable[]
-  notifications     Notification[]
-  assignments       Assignment[]
-  attendanceLogs    AttendanceLog[]
-  refreshTokens     RefreshToken[]
+  pushSubscriptions   PushSubscription[]
+  timetable           Timetable[]
+  notifications       Notification[]
+  assignments         Assignment[]
+  attendanceLogs      AttendanceLog[]
+  attendanceAuditLogs AttendanceAuditLog[]
+  refreshTokens       RefreshToken[]
 
   @@map("users")
 }
@@ -52,19 +53,20 @@ model PushSubscription {
 // --- 時間割 ---
 
 model Timetable {
-  id                  String  @id @default(uuid())
-  userId              String  @map("user_id")
-  dayOfWeek           Int     @map("day_of_week") // 0=日, 1=月, ..., 6=土
-  period              Int     // 1限〜6限
-  className           String  @map("class_name")
-  room                String?
-  classId             String? @map("class_id")
+  id                   String  @id @default(uuid())
+  userId               String  @map("user_id")
+  dayOfWeek            Int     @map("day_of_week") // 0=日, 1=月, ..., 6=土
+  period               Int // 1限〜6限
+  className            String  @map("class_name")
+  room                 String?
+  classId              String? @map("class_id")
   attendanceUrlPattern String? @map("attendance_url_pattern")
-  syllabusId          String? @map("syllabus_id")
+  syllabusId           String? @map("syllabus_id")
 
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  syllabus       Syllabus?      @relation(fields: [syllabusId], references: [id])
-  attendanceLogs AttendanceLog[]
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  syllabus            Syllabus?            @relation(fields: [syllabusId], references: [id])
+  attendanceLogs      AttendanceLog[]
+  attendanceAuditLogs AttendanceAuditLog[]
 
   @@unique([userId, dayOfWeek, period])
   @@map("timetables")
@@ -75,7 +77,7 @@ model Timetable {
 model Notification {
   id          String   @id @default(uuid())
   userId      String   @map("user_id")
-  source      String   // 'cit-portal' | 'manaba'
+  source      String // 'cit-portal' | 'manaba'
   // WHY: externalIdは外部システム上のID（差分検出用）、originalUrlは表示用リンク。責務を分離
   externalId  String   @map("external_id")
   title       String
@@ -120,8 +122,8 @@ model AttendanceLog {
   userId      String   @map("user_id")
   timetableId String   @map("timetable_id")
   classDate   DateTime @map("class_date") @db.Date
-  status      String   // 'success' | 'failed' | 'manual' | 'skipped'
-  method      String   // 'auto' | 'manual' | 'qr-learn'
+  status      String // 'success' | 'failed' | 'manual' | 'skipped'
+  method      String // 'auto' | 'manual' | 'qr-learn'
   attemptedAt DateTime @default(now()) @map("attempted_at")
   errorDetail String?  @map("error_detail") @db.Text
 
@@ -133,26 +135,70 @@ model AttendanceLog {
   @@map("attendance_logs")
 }
 
+// --- 出席監査ログ (append-only) ---
+//
+// WHY: AttendanceLog は 1 ジョブ = 1 行で「最終結果」を上書き保存するのに対し、
+// 監査ログは「いつ何をしようとしたか」を時系列で全て残す。auto 解禁条件
+// (AGENTS.md「出席auto解禁条件」) の前提となる、送信前後 / skipped / blocked
+// の各イベントを改竄不可な形で蓄積する。
+//
+// append-only 設計:
+// - コード側で create のみを呼び、update/delete は提供しない
+// - 既存行の上書き禁止 (一意制約も付けない、status の遷移は新規行で表現)
+// - 運用フェーズで Postgres role 権限を分けて DB レベルでも UPDATE/DELETE を禁止する想定
+model AttendanceAuditLog {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  // WHY: timetable / classDate は blocked (job data 不正など) の段階で取得できないので nullable
+  timetableId String?   @map("timetable_id")
+  classDate   DateTime? @map("class_date") @db.Date
+  // WHY: method は AttendanceMode ('manual'|'confirm'|'auto')。
+  // blocked 段階で job data から取れない場合は null
+  method      String?
+  // WHY: phase は監査ログの主軸。'pre_attempt' (adapter.attend 直前) /
+  // 'post_attempt' (adapter.attend 直後) / 'skipped' (pre-network reject) /
+  // 'blocked' (zod 検証失敗・timetable 不在など) の 4 値を文字列で表現
+  phase       String
+  // WHY: outcome は post_attempt 時のみ意味を持つ ('success'|'failed')。
+  // pre_attempt / skipped / blocked では null
+  outcome     String?
+  // WHY: skipped/blocked の理由文字列。外部 HTML 由来の場合はサニタイズ済みで保存
+  reason      String?   @db.Text
+  // WHY: BullMQ ジョブ ID。同一ジョブの pre_attempt → post_attempt を結びつけるため
+  jobId       String?   @map("job_id")
+  // WHY: 任意の追加データ (sanitized message, guard input snapshot 等)
+  metadata    Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timetable Timetable? @relation(fields: [timetableId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([userId, timetableId, classDate])
+  @@index([jobId])
+  @@map("attendance_audit_logs")
+}
+
 // --- シラバス ---
 
 model Syllabus {
-  id            String   @id @default(uuid())
-  academicYear  Int      @map("academic_year")
-  semester      String   // '前期' | '後期' | '通年'
-  courseName    String   @map("course_name")
-  courseCode     String?  @map("course_code")
-  instructor    String
-  department    String
-  campus        String
-  dayOfWeek     String?  @map("day_of_week")
-  period        String?
-  category      String?
-  objectives    String?  @db.Text
-  schedule      String?  @db.Text
-  evaluation    String?  @db.Text
-  textbooks     String?  @db.Text
-  originalUrl   String   @map("original_url")
-  fetchedAt     DateTime @default(now()) @map("fetched_at")
+  id           String   @id @default(uuid())
+  academicYear Int      @map("academic_year")
+  semester     String // '前期' | '後期' | '通年'
+  courseName   String   @map("course_name")
+  courseCode   String?  @map("course_code")
+  instructor   String
+  department   String
+  campus       String
+  dayOfWeek    String?  @map("day_of_week")
+  period       String?
+  category     String?
+  objectives   String?  @db.Text
+  schedule     String?  @db.Text
+  evaluation   String?  @db.Text
+  textbooks    String?  @db.Text
+  originalUrl  String   @map("original_url")
+  fetchedAt    DateTime @default(now()) @map("fetched_at")
 
   timetableEntries Timetable[]
 
@@ -168,7 +214,7 @@ model RefreshToken {
   userId    String   @map("user_id")
   expiresAt DateTime @map("expires_at")
   used      Boolean  @default(false)
-  family    String   // トークンファミリー（連鎖検知用）
+  family    String // トークンファミリー（連鎖検知用）
   createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

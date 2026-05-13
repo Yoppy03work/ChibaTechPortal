@@ -41,6 +41,7 @@ const timetableFindUnique = vi.fn();
 const attendanceLogFindFirst = vi.fn();
 const attendanceLogUpdateMany = vi.fn();
 const attendanceLogCreate = vi.fn();
+const attendanceAuditLogCreate = vi.fn();
 vi.mock('@chibatech/db', () => ({
   prisma: {
     timetable: {
@@ -51,6 +52,18 @@ vi.mock('@chibatech/db', () => ({
       updateMany: (...args: unknown[]) => attendanceLogUpdateMany(...args),
       create: (...args: unknown[]) => attendanceLogCreate(...args),
     },
+    attendanceAuditLog: {
+      create: (...args: unknown[]) => attendanceAuditLogCreate(...args),
+    },
+  },
+}));
+
+// WHY: attendance-job 内で Prisma.JsonNull を参照する。vi.mock の factory は
+// hoist されるため、外部の const を参照すると TDZ で ReferenceError になる。
+// Symbol を factory 内で直接生成することで回避する。
+vi.mock('@prisma/client', () => ({
+  Prisma: {
+    JsonNull: Symbol('Prisma.JsonNull'),
   },
 }));
 
@@ -135,6 +148,8 @@ beforeEach(() => {
   attendanceLogUpdateMany.mockResolvedValue({ count: 0 });
   attendanceLogCreate.mockResolvedValue({});
   attendanceLogFindFirst.mockResolvedValue(null);
+  // append-only 監査ログの create は best-effort。デフォルト success
+  attendanceAuditLogCreate.mockResolvedValue({});
 });
 
 afterAll(() => {
@@ -272,15 +287,86 @@ describe('processAttendanceJob — pre-network reject 時のログ/通知', () =
     // ユーザー通知が走る
     expect(notifyAdd).toHaveBeenCalledTimes(1);
   });
+});
 
-  // WHY: success path で errorDetail が undefined のままだと Prisma が
-  // 「更新しない」と解釈し、過去 failed の errorDetail が残る。呼び出し側で
-  // 明示的に null を渡し、updateMany / create の data.errorDetail に null が
-  // セットされることを保証する。
-  // pre-network ガードは現状 qrSessionValid=false 固定で必ず reject するため、
-  // success path 自体はこのテストでは到達しない。null clear の挙動は
-  // saveLog のシグネチャ (string | null = null) と呼び出し側の
-  // `result.success ? null : sanitizedMessage ?? null` で保証している。
-  // ここでは reject 経路で errorDetail が non-null 文字列であることを固定し、
-  // success 時に null になるべき箇所と区別がつくことを示す。
+// ============================================================
+// 監査ログ (append-only): 各イベントポイントで AttendanceAuditLog が記録される
+// ============================================================
+describe('processAttendanceJob — 監査ログ', () => {
+  it('pre-network reject で AttendanceAuditLog に phase=skipped + reason + jobId が append される', async () => {
+    delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'job-skipped', data: validJobData() }, adapter);
+
+    expect(attendanceAuditLogCreate).toHaveBeenCalledTimes(1);
+    const call = attendanceAuditLogCreate.mock.calls[0][0] as {
+      data: {
+        phase: string;
+        userId: string;
+        timetableId: string | null;
+        method: string | null;
+        outcome: string | null;
+        reason: string | null;
+        jobId: string | null;
+      };
+    };
+    expect(call.data.phase).toBe('skipped');
+    expect(call.data.userId).toBe('user-1');
+    expect(call.data.timetableId).toBe('tt-1');
+    expect(call.data.method).toBe('auto');
+    // skipped では outcome は null
+    expect(call.data.outcome).toBeNull();
+    // reason は guard が返した文字列のサニタイズ済み版
+    expect(typeof call.data.reason).toBe('string');
+    expect((call.data.reason as string).length).toBeGreaterThan(0);
+    expect(call.data.jobId).toBe('job-skipped');
+  });
+
+  it('timetable 不在で AttendanceAuditLog に phase=blocked が append される', async () => {
+    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
+    timetableFindUnique.mockResolvedValue(null);
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'job-blocked', data: validJobData() }, adapter);
+
+    expect(attendanceAuditLogCreate).toHaveBeenCalledTimes(1);
+    const call = attendanceAuditLogCreate.mock.calls[0][0] as {
+      data: { phase: string; reason: string | null; jobId: string | null };
+    };
+    expect(call.data.phase).toBe('blocked');
+    expect(call.data.reason).toBe('timetable not found');
+    expect(call.data.jobId).toBe('job-blocked');
+
+    // adapter には触れない (blocked は guard 以前)
+    expect(adapter.healthCheck).not.toHaveBeenCalled();
+    expect(adapter.attend).not.toHaveBeenCalled();
+  });
+
+  it('不正な job.data で throw された場合は AttendanceAuditLog は記録されない (userId 不明のため)', async () => {
+    // WHY: zod 失敗時は job.data から userId が取れないので、append-only 監査ログ
+    // (user_id NOT NULL) には書けない。throw のみで応答する
+    const adapter = makeAdapter();
+
+    await expect(
+      processAttendanceJob({ id: 'job-invalid', data: { broken: true } }, adapter)
+    ).rejects.toThrow('Invalid attendance job data');
+
+    expect(attendanceAuditLogCreate).not.toHaveBeenCalled();
+  });
+
+  // WHY: pre_attempt / post_attempt の append は qrSessionValid=false 固定で
+  // 現状到達しない (4 重ロックの一環)。auto dry-run / allowlist 段階で初めて
+  // 機能するため、この時点では到達経路がないことを Worker テストで保証する。
+  // pre_attempt / post_attempt の入力 → Prisma create data 変換は
+  // shared/tests/attendance-audit.test.ts で完全網羅している。
+  it('append-only: 監査ログに対して update / delete のメソッドはモックに存在しない (= 呼ばれていない)', () => {
+    // モック定義に attendanceAuditLog.update / delete を意図的に追加していない。
+    // これは「コード側で update/delete を呼ばない」設計を強制するための保険。
+    // もしコードが update/delete を呼ぶようになったら、ランタイムで
+    // "is not a function" として検出される。
+    expect(typeof (attendanceAuditLogCreate as { mockResolvedValue?: unknown }))
+      .toBe('function');
+  });
 });

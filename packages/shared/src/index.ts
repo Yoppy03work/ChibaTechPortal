@@ -116,3 +116,12 @@ export {
   evaluateAttendanceAutoGuard,
   evaluateAttendanceAutoGuardPreNetwork,
 } from './lib/attendance-auto-guard';
+
+export {
+  type AuditPhase,
+  type AuditOutcome,
+  type AttendanceAuditLogInput,
+  auditPhaseSchema,
+  auditOutcomeSchema,
+  toAttendanceAuditLogCreateData,
+} from './lib/attendance-audit';
