@@ -9,6 +9,7 @@ import { redirect } from 'next/navigation';
 import { prisma } from '@chibatech/db';
 import { normalizeAttendanceSettings } from '@chibatech/shared';
 import { AttendanceSettings } from './attendance-settings';
+import { ConfirmFlow } from './confirm-flow';
 
 export default async function AttendancePage() {
   const session = await auth();
@@ -20,6 +21,21 @@ export default async function AttendancePage() {
   });
 
   const settings = normalizeAttendanceSettings(user?.attendanceSettings ?? null);
+
+  // confirm モードの確認フローには時間割が必要
+  const timetables =
+    settings.mode === 'confirm'
+      ? await prisma.timetable.findMany({
+          where: { userId: session.user.id },
+          select: {
+            id: true,
+            dayOfWeek: true,
+            period: true,
+            className: true,
+            room: true,
+          },
+        })
+      : [];
 
   // 直近7日の出席ログ
   const since = new Date();
@@ -42,6 +58,9 @@ export default async function AttendancePage() {
 
       {/* 出席モード設定 */}
       <AttendanceSettings initialMode={settings.mode} />
+
+      {/* confirm モードのときだけ確認フローを表示 */}
+      {settings.mode === 'confirm' && <ConfirmFlow timetables={timetables} />}
 
       {/* 出席ログ */}
       <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
