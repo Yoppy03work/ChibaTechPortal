@@ -24,15 +24,20 @@ import {
   normalizeAttendanceSettings,
   evaluateAttendanceAutoGuard,
   evaluateAttendanceAutoGuardPreNetwork,
+  evaluateConfirmSubmitGuard,
   toAttendanceAuditLogCreateData,
+  ATTENDANCE_QUEUE_NAME as SHARED_ATTENDANCE_QUEUE_NAME,
 } from '@chibatech/shared';
 import type {
   AttendanceMode,
   AttendanceAutoGuardPreNetworkInput,
   AttendanceAuditLogInput,
+  ConfirmSubmitGuardInput,
 } from '@chibatech/shared';
 
-export const ATTENDANCE_QUEUE_NAME = 'attendance';
+// WHY: shared から 1 つの真実 (キュー名) を import して再 export する。
+// Producer (web) / Consumer (worker) の文字列ドリフトを防ぐ。
+export const ATTENDANCE_QUEUE_NAME = SHARED_ATTENDANCE_QUEUE_NAME;
 
 export const attendanceQueue = new Queue(ATTENDANCE_QUEUE_NAME, {
   connection: bullmqConnection,
@@ -132,58 +137,25 @@ export async function processAttendanceJob(
     },
   });
 
-  // 4. pre-network guard (DB / 内部状態のみで判定)
-  // WHY: ここで reject される入力では adapter.healthCheck() も呼ばない。
-  // env disabled / qrSessionValid=false など外部アクセス前に確定する条件で
-  // 実 HTTP を出さないようにする。
-  const guardInput: AttendanceAutoGuardPreNetworkInput = {
-    // WHY: server 側の明示的キルスイッチ。QR セッション検証 DB が入るまで
-    // true にしても qrSessionValid=false により自動送信は解禁されない。
-    autoExecutionEnabled: process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED === 'true',
+  // 4. method 別の guard (auto / confirm) を評価。reject なら共通 skip 処理へ
+  // WHY: auto と confirm でガード条件が違う:
+  //   - auto: env キルスイッチ + 6 条件 + healthCheck + qrSessionValid 等
+  //   - confirm: timetable 所有 / room 一致 / 時刻ウィンドウ / 重複 / creds / healthCheck
+  // 共通化部分は guardRejection 統一型に正規化する。
+  const guardRejection = await evaluateMethodGuard({
     method,
-    storedMode: normalizeAttendanceSettings(timetable.user.attendanceSettings).mode,
-    timetableUserId: timetable.userId,
-    jobUserId: userId,
-    timetableRoom: timetable.room,
-    jobRoomId: roomId,
-    dayOfWeek: timetable.dayOfWeek,
-    period: timetable.period,
+    userId,
+    timetableId,
+    roomId,
+    classDate,
     now,
-    alreadySubmitted: !!existingSuccess,
-    qrSessionValid: false,
-  };
-
-  const preGuard = evaluateAttendanceAutoGuardPreNetwork(guardInput);
-  if (!preGuard.allowed) {
-    const reason = sanitizeExternalText(preGuard.reason);
-    await saveLog(userId, timetableId, 'skipped', method, reason, classDate);
-    await recordAuditBestEffort({
-      userId,
-      phase: 'skipped',
-      timetableId,
-      classDate,
-      method,
-      reason,
-      jobId: jobIdString(job.id),
-    });
-    await notifyUser(userId, displayClassName, false, reason);
-    console.warn(`[attendance] skipped (pre-network) job id=${job.id}: ${reason}`);
-    return;
-  }
-
-  // 5. healthCheck — ここで初めて外部アクセス
-  // 注意: フェーズ 0 では preGuard が qrSessionValid=false で必ず reject する
-  // ため、この行に到達することはない。auto dry-run / allowlist 段階で初めて
-  // 意味を持つ。
-  const healthy = await adapter.healthCheck();
-
-  // 6. 完全 guard (campusReachable 含む)
-  const guard = evaluateAttendanceAutoGuard({
-    ...guardInput,
-    campusReachable: healthy,
+    timetable,
+    existingSuccess,
+    adapter,
   });
-  if (!guard.allowed) {
-    const reason = sanitizeExternalText(guard.reason);
+
+  if (guardRejection) {
+    const reason = sanitizeExternalText(guardRejection.reason);
     await saveLog(userId, timetableId, 'skipped', method, reason, classDate);
     await recordAuditBestEffort({
       userId,
@@ -193,12 +165,12 @@ export async function processAttendanceJob(
       method,
       reason,
       jobId: jobIdString(job.id),
-      // WHY: post-network reject (healthCheck 後) は campusReachable=false が
-      // 主因。集計時に pre-network reject と区別できるよう metadata に残す
-      metadata: { campusReachable: healthy, stage: 'post_network' },
+      metadata: guardRejection.metadata ?? null,
     });
     await notifyUser(userId, displayClassName, false, reason);
-    console.warn(`[attendance] skipped job id=${job.id}: ${reason}`);
+    console.warn(
+      `[attendance] skipped (${guardRejection.stage}) job id=${job.id}: ${reason}`
+    );
     return;
   }
 
@@ -298,6 +270,133 @@ export async function processAttendanceJob(
   } finally {
     masterKey.fill(0);
   }
+}
+
+/**
+ * method 別の guard 評価結果。reject 理由と stage を返す。
+ *
+ * WHY: auto と confirm で guard 条件が違うため、processAttendanceJob 内で
+ * 大きな if-else が散らかる。method 分岐をこの関数に閉じ込めて、
+ * 呼び出し側は「reject ならスキップ処理」のみに集中する。
+ */
+type GuardRejection = {
+  reason: string;
+  stage: 'pre_network' | 'post_network' | 'unsupported_method';
+  metadata?: Record<string, unknown>;
+};
+
+interface MethodGuardInput {
+  method: AttendanceMode;
+  userId: string;
+  timetableId: string;
+  roomId: string;
+  classDate: Date;
+  now: Date;
+  timetable: {
+    userId: string;
+    dayOfWeek: number;
+    period: number;
+    room: string | null;
+    user: {
+      // WHY: Prisma Bytes は Uint8Array として型付けされる。Buffer は Uint8Array の
+      // サブクラスなので、汎用に Uint8Array で受ける
+      encryptedCitCreds: Uint8Array | null;
+      attendanceSettings: unknown;
+    };
+  };
+  existingSuccess: unknown;
+  adapter: AttendanceAdapter;
+}
+
+async function evaluateMethodGuard(
+  input: MethodGuardInput
+): Promise<GuardRejection | null> {
+  if (input.method === 'auto') {
+    return evaluateAutoMethodGuard(input);
+  }
+  if (input.method === 'confirm') {
+    return evaluateConfirmMethodGuard(input);
+  }
+  // manual は Worker で処理しない (UI 側で完結)。不明 method も同様
+  return {
+    reason: `unsupported method=${input.method}`,
+    stage: 'unsupported_method',
+  };
+}
+
+async function evaluateAutoMethodGuard(
+  input: MethodGuardInput
+): Promise<GuardRejection | null> {
+  // pre-network: DB / 内部状態だけで判定。reject 時は adapter に触れない
+  const guardInput: AttendanceAutoGuardPreNetworkInput = {
+    // WHY: server 側の明示的キルスイッチ。QR セッション検証 DB が入るまで
+    // true にしても qrSessionValid=false により自動送信は解禁されない。
+    autoExecutionEnabled: process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED === 'true',
+    method: input.method,
+    storedMode: normalizeAttendanceSettings(input.timetable.user.attendanceSettings).mode,
+    timetableUserId: input.timetable.userId,
+    jobUserId: input.userId,
+    timetableRoom: input.timetable.room,
+    jobRoomId: input.roomId,
+    dayOfWeek: input.timetable.dayOfWeek,
+    period: input.timetable.period,
+    now: input.now,
+    alreadySubmitted: !!input.existingSuccess,
+    qrSessionValid: false,
+  };
+
+  const pre = evaluateAttendanceAutoGuardPreNetwork(guardInput);
+  if (!pre.allowed) return { reason: pre.reason, stage: 'pre_network' };
+
+  // healthCheck で初めて外部アクセス。注: フェーズ 0 では preGuard が常に
+  // reject するため、この行に到達することはない。
+  const healthy = await input.adapter.healthCheck();
+
+  const full = evaluateAttendanceAutoGuard({ ...guardInput, campusReachable: healthy });
+  if (!full.allowed) {
+    return {
+      reason: full.reason,
+      stage: 'post_network',
+      metadata: { campusReachable: healthy, stage: 'post_network' },
+    };
+  }
+  return null;
+}
+
+async function evaluateConfirmMethodGuard(
+  input: MethodGuardInput
+): Promise<GuardRejection | null> {
+  // confirm の pre-network 相当: timetable 所有 / room 一致 / 時刻 / 重複 / creds
+  // WHY: フロント検証バイパス (curl 直 POST) でも room mismatch 等を確実に拒否
+  const guardInput: ConfirmSubmitGuardInput = {
+    jobUserId: input.userId,
+    jobTimetableId: input.timetableId,
+    jobRoomId: input.roomId,
+    jobClassDate: input.classDate,
+    timetableUserId: input.timetable.userId,
+    timetableRoom: input.timetable.room,
+    timetableDayOfWeek: input.timetable.dayOfWeek,
+    timetablePeriod: input.timetable.period,
+    alreadySubmittedConfirm: !!input.existingSuccess,
+    hasCitCreds: !!input.timetable.user.encryptedCitCreds,
+    now: input.now,
+  };
+
+  const confirmGuard = evaluateConfirmSubmitGuard(guardInput);
+  if (!confirmGuard.allowed) {
+    return { reason: confirmGuard.reason, stage: 'pre_network' };
+  }
+
+  // 全 pre-network が通ってから healthCheck (外部アクセス)
+  const healthy = await input.adapter.healthCheck();
+  if (!healthy) {
+    return {
+      reason: 'attendance system is not reachable from campus network',
+      stage: 'post_network',
+      metadata: { campusReachable: false, stage: 'post_network' },
+    };
+  }
+  return null;
 }
 
 /**
