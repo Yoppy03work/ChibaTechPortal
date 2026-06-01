@@ -402,8 +402,17 @@ async function saveLog(
   errorDetail: string | null = null,
   classDate = toClassDate(new Date())
 ) {
+  // WHY: success は terminal な監査記録。重複/リトライジョブが (alreadySubmitted で
+  // pre-network reject されたケースなど) skipped/failed を書き戻すと、既存の
+  // success 行が上書きされて「出席済みなのに未提出に見える」状態になる。
+  // status が success 以外のときは success 行を更新対象から除外する。
+  const where =
+    status === 'success'
+      ? { userId, timetableId, classDate, method }
+      : { userId, timetableId, classDate, method, NOT: { status: 'success' } };
+
   const updated = await prisma.attendanceLog.updateMany({
-    where: { userId, timetableId, classDate, method },
+    where,
     data: {
       status,
       attemptedAt: new Date(),
@@ -427,8 +436,9 @@ async function saveLog(
   } catch {
     // WHY: 並列Workerで create が競合した場合でもDB一意制約を最後の防壁にし、
     // 重複ログを増やさず最新状態へ収束させる。
+    // success 行を downgrade させないため、where (NOT success) を維持する。
     await prisma.attendanceLog.updateMany({
-      where: { userId, timetableId, classDate, method },
+      where,
       data: {
         status,
         attemptedAt: new Date(),
