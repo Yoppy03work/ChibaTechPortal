@@ -7,6 +7,11 @@ services:
       POSTGRES_DB: chibatech_portal
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    ports:
+      # WHY: ホスト側からの `npm test` (packages/db の Prisma 統合テスト) と
+      # `prisma migrate dev` が 5432 に届く必要がある。LAN 非公開を維持するため
+      # ループバックに束縛する (web の 127.0.0.1:3001 と同じ思想)。
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -19,6 +24,10 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    ports:
+      # WHY: ホスト側のレートリミッタ/BullMQ がローカル開発で 6379 に届く必要がある。
+      # LAN 非公開を維持するためループバックに束縛する。
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
