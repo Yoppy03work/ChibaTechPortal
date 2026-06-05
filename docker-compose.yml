@@ -55,7 +55,13 @@ services:
       - REDIS_URL=redis://redis:6379
       - NODE_ENV=development
     env_file:
-      - .env
+      # WHY: .env は tracked されておらず初回 checkout 直後は存在しない。
+      # `docker compose up postgres redis` だけ実行する経路 (test DB セットアップ)
+      # でも compose parser はファイル存在を要求するため、optional 化する。
+      # web/worker サービス起動時には .env が無くてもエラーにならず、
+      # 必要な変数は environment セクション + シェル env から埋まる。
+      - path: .env
+        required: false
     depends_on:
       postgres:
         condition: service_healthy
@@ -81,7 +87,13 @@ services:
       - REDIS_URL=redis://redis:6379
       - NODE_ENV=development
     env_file:
-      - .env
+      # WHY: .env は tracked されておらず初回 checkout 直後は存在しない。
+      # `docker compose up postgres redis` だけ実行する経路 (test DB セットアップ)
+      # でも compose parser はファイル存在を要求するため、optional 化する。
+      # web/worker サービス起動時には .env が無くてもエラーにならず、
+      # 必要な変数は environment セクション + シェル env から埋まる。
+      - path: .env
+        required: false
     depends_on:
       postgres:
         condition: service_healthy

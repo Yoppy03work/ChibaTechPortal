@@ -42,10 +42,25 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 
-echo "[3/3] chibatech_portal_test にスキーマを適用 (prisma migrate deploy)..."
+echo "[3/4] chibatech_portal_test にスキーマを適用 (prisma migrate deploy)..."
 DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/chibatech_portal_test' \
   npx prisma migrate deploy --schema packages/db/prisma/schema.prisma
 
+echo "[4/4] Prisma Client を再生成 (migrate deploy は generate を含まない)..."
+# WHY: `prisma migrate deploy` は schema 適用のみで Prisma Client 生成は行わない
+# (公式ドキュメント明記)。CI でも migrate と generate を別ステップに分けている。
+# fresh checkout 直後は @prisma/client が空 stub なので、これを忘れると test 内の
+# PrismaClient import で失敗する。
+npx prisma generate --schema packages/db/prisma/schema.prisma
+
 echo ""
 echo "✓ test DB (chibatech_portal_test) is ready"
-echo "  次は: npm run test --workspace=@chibatech/db"
+echo ""
+echo "  次のステップ (DATABASE_URL は .env.test を明示的に読む必要あり):"
+echo "    npm run test --workspace=@chibatech/db -- --mode=test"
+echo "  もしくは:"
+echo "    set -a; source .env.test; set +a; npm run test --workspace=@chibatech/db"
+echo ""
+echo "  WHY: packages/db/vitest.config.ts は .env.test を自動 load しないため、"
+echo "       host shell の DATABASE_URL が dev DB (.env) を指していると"
+echo "       テストが dev DB を叩いてしまう。.env.test を明示的に source すること。"
