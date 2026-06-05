@@ -18,13 +18,34 @@ describe('confirmSubmitInputSchema', () => {
     expect(r.success).toBe(true);
   });
 
-  it('ISO datetime 形式の classDate も受け入れる', () => {
+  // WHY: 当初 ISO datetime も受け入れていたが、TZ 付き文字列を受けると
+  // toClassDate() がローカル TZ で truncate して JST 視点と乖離するため、
+  // strict YYYY-MM-DD のみに絞った (Codex 指摘)。frontend は規約上 YYYY-MM-DD で送る。
+  it('ISO datetime 形式の classDate は拒否する (YYYY-MM-DD のみ受け付ける)', () => {
     const r = confirmSubmitInputSchema.safeParse({
       timetableId: 'tt-1',
       roomId: '8109',
       classDate: '2026-05-12T00:00:00.000Z',
     });
-    expect(r.success).toBe(true);
+    expect(r.success).toBe(false);
+  });
+
+  it('YYYY/MM/DD などのスラッシュ形式も拒否する', () => {
+    const r = confirmSubmitInputSchema.safeParse({
+      timetableId: 'tt-1',
+      roomId: '8109',
+      classDate: '2026/05/12',
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('存在しない日 (2026-02-30) を拒否する', () => {
+    const r = confirmSubmitInputSchema.safeParse({
+      timetableId: 'tt-1',
+      roomId: '8109',
+      classDate: '2026-02-30',
+    });
+    expect(r.success).toBe(false);
   });
 
   it('roomId に空白が含まれると拒否', () => {

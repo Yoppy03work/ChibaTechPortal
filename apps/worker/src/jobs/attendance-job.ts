@@ -246,6 +246,13 @@ export async function processAttendanceJob(
             reason: errMessage,
             jobId: jobIdString(job.id),
           });
+          // WHY: ユーザは UI で「結果は通知でお知らせします」を見た後ジョブ完了を
+          // 待っている。throw だけして saveLog/notifyUser を通らないと、出席履歴に
+          // 何も残らず通知も来ない (Codex 指摘)。BullMQ の失敗扱いは re-throw で
+          // 別途記録されるが、それは運用上の indicator であってユーザ向けではない。
+          // 例外時も AttendanceLog に failed を残し、通知を送ってから re-throw する。
+          await saveLog(userId, timetableId, 'failed', method, errMessage, classDate);
+          await notifyUser(userId, displayClassName, false, errMessage);
           throw err;
         }
 
@@ -381,6 +388,21 @@ async function evaluateAutoMethodGuard(
 async function evaluateConfirmMethodGuard(
   input: MethodGuardInput
 ): Promise<GuardRejection | null> {
+  // WHY: API 側で mode='confirm' をチェック済だが、enqueue 後の遅延中に
+  // ユーザが mode を manual/auto に切替えた場合、stale なジョブが confirm
+  // 経路で adapter.attend() まで走ってしまう。Worker 入口でも最新の
+  // attendanceSettings を再評価して、現時点で confirm でなければ skip する。
+  const storedMode = normalizeAttendanceSettings(
+    input.timetable.user.attendanceSettings
+  ).mode;
+  if (storedMode !== 'confirm') {
+    return {
+      reason: 'not_in_confirm_mode',
+      stage: 'pre_network',
+      metadata: { storedMode },
+    };
+  }
+
   // confirm の pre-network 相当: timetable 所有 / room 一致 / 時刻 / 重複 / creds
   // WHY: フロント検証バイパス (curl 直 POST) でも room mismatch 等を確実に拒否
   const guardInput: ConfirmSubmitGuardInput = {

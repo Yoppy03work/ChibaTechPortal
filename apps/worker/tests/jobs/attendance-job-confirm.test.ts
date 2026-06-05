@@ -93,6 +93,7 @@ function timetableRow(overrides: Partial<{
   userId: string;
   room: string | null;
   encryptedCitCreds: Buffer | null;
+  attendanceSettings: unknown;
 }> = {}) {
   return {
     id: 'tt-1',
@@ -106,8 +107,13 @@ function timetableRow(overrides: Partial<{
         overrides.encryptedCitCreds === undefined
           ? Buffer.from('encrypted')
           : overrides.encryptedCitCreds,
-      // WHY: confirm モードでは attendanceSettings.mode は guard で見ない
-      attendanceSettings: { mode: 'confirm' },
+      // WHY: confirm 経路では Worker でも mode を再評価 (enqueue 後の mode 変更で
+      // stale ジョブが confirm として走るのを防ぐ)。デフォルトは confirm、
+      // mode-stale テストで auto/manual に差し替える。
+      attendanceSettings:
+        overrides.attendanceSettings === undefined
+          ? { mode: 'confirm' }
+          : overrides.attendanceSettings,
     },
   };
 }
@@ -278,6 +284,38 @@ describe('processAttendanceJob — method=confirm guard reject', () => {
     expect(adapter.attend).not.toHaveBeenCalled();
   });
 
+  // WHY: API で mode='confirm' をチェックしても、enqueue 後にユーザが mode を
+  // 切替えると stale ジョブが confirm 経路で走り続ける。Worker 入口でも
+  // attendanceSettings.mode を再評価して skip する (Codex 指摘)。
+  it('mode が auto に切替えられていれば confirm ジョブは adapter を呼ばずに skip', async () => {
+    timetableFindUnique.mockResolvedValue(
+      timetableRow({ attendanceSettings: { mode: 'auto' } })
+    );
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'c-mode-stale', data: confirmJobData() }, adapter);
+
+    expect(adapter.healthCheck).not.toHaveBeenCalled();
+    expect(adapter.attend).not.toHaveBeenCalled();
+    // 監査ログに skip 理由が残る
+    const skippedAudit = attendanceAuditLogCreate.mock.calls.find(
+      (c) => (c[0] as { data: { reason: string | null } }).data.reason === 'not_in_confirm_mode'
+    );
+    expect(skippedAudit).toBeDefined();
+  });
+
+  it('mode が manual に切替えられていれば confirm ジョブは skip', async () => {
+    timetableFindUnique.mockResolvedValue(
+      timetableRow({ attendanceSettings: { mode: 'manual' } })
+    );
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'c-mode-manual', data: confirmJobData() }, adapter);
+
+    expect(adapter.healthCheck).not.toHaveBeenCalled();
+    expect(adapter.attend).not.toHaveBeenCalled();
+  });
+
   it('healthCheck 失敗 (campus 到達不可) で adapter.attend は呼ばれない', async () => {
     // WHY: healthCheck で 1 度外部アクセスは発生するが、attend には進まない
     timetableFindUnique.mockResolvedValue(timetableRow());
@@ -302,5 +340,27 @@ describe('processAttendanceJob — method=confirm guard reject', () => {
     expect(skipped).toBeDefined();
     expect((skipped![0] as { data: { method: string; reason: string } }).data.method).toBe('confirm');
     expect((skipped![0] as { data: { reason: string } }).data.reason).toContain('room_mismatch');
+  });
+
+  // WHY: adapter.attend が例外を throw した場合も、UI は「結果は通知でお知らせします」
+  // を表示してジョブ完了を待っている。throw だけで saveLog/notifyUser を通らない
+  // と、出席履歴に何も残らず通知も来ない (Codex 指摘)。catch 内で failed ログ +
+  // notify を保証してから re-throw する。
+  it('adapter.attend が throw しても AttendanceLog の failed と notifyUser は通る', async () => {
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    const adapter = makeAdapter();
+    adapter.attend.mockRejectedValue(new Error('network timeout'));
+
+    await expect(
+      processAttendanceJob({ id: 'c-throw', data: confirmJobData() }, adapter)
+    ).rejects.toThrow('network timeout');
+
+    // AttendanceLog に failed が書かれる
+    const failedWrite = attendanceLogCreate.mock.calls.find(
+      (c) => (c[0] as { data: { status: string } }).data.status === 'failed'
+    );
+    expect(failedWrite).toBeDefined();
+    // ユーザ通知も呼ばれる (push notification キュー add)
+    expect(notifyAdd).toHaveBeenCalled();
   });
 });
