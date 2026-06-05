@@ -178,7 +178,48 @@ describe('processAttendanceJob — method=confirm 成功パス', () => {
     expect(successWrite).toBeDefined();
     expect((successWrite![0] as { data: { method: string } }).data.method).toBe('confirm');
   });
+
+  // WHY: 遅延ジョブが Worker 実行時に new Date() で classDate を再計算すると、
+  // ユーザが確認した日と別日の出席を送ってしまう (replay protection が機能しない)。
+  // payload の classDate を尊重することを、existingSuccess 検索の where 引数で
+  // 確認する (実行時刻 ≠ payload 日付に固定しても、payload 日付で照会される)。
+  it('payload の classDate が DB 検索 / AttendanceLog 書き込みに使われる (実行時刻ではなく)', async () => {
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    const adapter = makeAdapter();
+
+    // 実行時刻は in-window の月曜 9:25 だが、payload はその同じ日を ISO 文字列で
+    // 明示する。assert は「Worker 内で payload を読んで Date に戻している」こと。
+    const PAYLOAD_DATE = '2026-05-04';
+    await processAttendanceJob(
+      { id: 'c-cd', data: { ...confirmJobData(), classDate: PAYLOAD_DATE } },
+      adapter
+    );
+
+    // 1) existingSuccess 検索の where.classDate が payload 由来
+    // WHY: toISOString() を使うと UTC 変換で前日にズレる (JST 環境)。
+    // ローカルカレンダーの年/月/日で比較する。
+    expect(attendanceLogFindFirst).toHaveBeenCalledTimes(1);
+    const findWhere = (attendanceLogFindFirst.mock.calls[0][0] as {
+      where: { classDate: Date };
+    }).where;
+    expect(localDateString(findWhere.classDate)).toBe(PAYLOAD_DATE);
+
+    // 2) AttendanceLog success の classDate も payload 由来
+    const successWrite = attendanceLogCreate.mock.calls.find(
+      (c) => (c[0] as { data: { status: string } }).data.status === 'success'
+    );
+    expect(successWrite).toBeDefined();
+    const writtenDate = (successWrite![0] as { data: { classDate: Date } }).data.classDate;
+    expect(localDateString(writtenDate)).toBe(PAYLOAD_DATE);
+  });
 });
+
+function localDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 describe('processAttendanceJob — method=confirm guard reject', () => {
   it('room mismatch (PR #15 残リスク対応) で adapter は呼ばれない', async () => {

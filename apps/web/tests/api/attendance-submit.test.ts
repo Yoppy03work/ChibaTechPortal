@@ -37,6 +37,14 @@ vi.mock('@/lib/attendance-queue', () => ({
   },
 }));
 
+// rateLimiter は Redis 接続を持つので mock。テスト個別に挙動を差し替える
+const rateLimiterCheck = vi.fn();
+vi.mock('@/lib/rate-limiter', () => ({
+  rateLimiter: {
+    check: (...args: unknown[]) => rateLimiterCheck(...args),
+  },
+}));
+
 import { POST } from '@/app/api/attendance/submit/route';
 
 // 1 限 9:30 開始 - 5 分 = 9:25 がターゲット (月曜)
@@ -70,6 +78,7 @@ function timetableRow(overrides: Partial<{
   userId: string;
   room: string | null;
   encryptedCitCreds: Buffer | null;
+  className: string;
 }> = {}) {
   return {
     id: 'tt-1',
@@ -77,6 +86,7 @@ function timetableRow(overrides: Partial<{
     dayOfWeek: 1,
     period: 1,
     room: overrides.room === undefined ? '8109' : overrides.room,
+    className: overrides.className ?? 'プログラミング',
     user: {
       encryptedCitCreds:
         overrides.encryptedCitCreds === undefined
@@ -92,8 +102,15 @@ beforeEach(() => {
   timetableFindUnique.mockReset();
   attendanceLogFindFirst.mockReset();
   queueAdd.mockReset();
+  rateLimiterCheck.mockReset();
   attendanceLogFindFirst.mockResolvedValue(null);
   queueAdd.mockResolvedValue({});
+  // WHY: デフォルトは「許可」。rate-limit テストでだけ throttled を返す
+  rateLimiterCheck.mockResolvedValue({
+    allowed: true,
+    remaining: 9,
+    resetAt: new Date(Date.now() + 10 * 60 * 1000),
+  });
   vi.useFakeTimers();
   vi.setSystemTime(IN_WINDOW);
 });
@@ -256,6 +273,12 @@ describe('POST /api/attendance/submit — 成功パス', () => {
       timetableId: 'tt-1',
       roomId: '8109',
       method: 'confirm',
+      // WHY: Worker 入口の zod (className.min(1)) を通すため timetable 実値が
+      // payload に必要。空文字だと全 confirm ジョブが parse 段階で死ぬ回帰を防ぐ。
+      className: 'プログラミング',
+      // WHY: ユーザが UI で確認した日。Worker が new Date() で再計算すると
+      // 遅延ジョブで別日の出席を送るため、payload で運ぶ必要がある。
+      classDate: TODAY_ISO,
     });
     // jobId で同日同 timetable を一意化 (二重 enqueue 防止)
     expect(opts.jobId).toContain('confirm:user-1:tt-1:');
@@ -271,5 +294,38 @@ describe('POST /api/attendance/submit — 成功パス', () => {
 
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+});
+
+describe('POST /api/attendance/submit — rate limit', () => {
+  it('rateLimiter が allowed=false を返すと 429 + Retry-After ヘッダ', async () => {
+    // WHY: 認証済みユーザが連打した場合の DoS 緩和。jobId 衝突は実 attend を
+    // 一意化するが、ハンドラ自体の DB read + enqueue 負荷は残るためここで弾く。
+    authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    rateLimiterCheck.mockResolvedValue({
+      allowed: false,
+      remaining: 0,
+      resetAt: new Date(Date.now() + 60_000),
+    });
+
+    const res = await POST(makeReq(validBody()));
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toMatch(/^\d+$/);
+    // rate-limit で弾かれた場合は timetable も queue も触らない
+    expect(timetableFindUnique).not.toHaveBeenCalled();
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
+  it('rateLimiter は認証済みユーザID 単位で呼び出される', async () => {
+    authMock.mockResolvedValue({ user: { id: 'user-42' } });
+    timetableFindUnique.mockResolvedValue(timetableRow({ userId: 'user-42' }));
+
+    await POST(makeReq(validBody()));
+
+    expect(rateLimiterCheck).toHaveBeenCalledTimes(1);
+    const [key, config] = rateLimiterCheck.mock.calls[0];
+    expect(key).toBe('attend-submit:user-42');
+    // RATE_LIMITS.attendanceSubmit は 10/10min
+    expect(config).toMatchObject({ maxRequests: 10, windowSeconds: 10 * 60 });
   });
 });

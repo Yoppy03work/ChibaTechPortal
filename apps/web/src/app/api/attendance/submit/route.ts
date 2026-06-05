@@ -19,9 +19,11 @@ import {
   evaluateConfirmSubmitGuard,
   ATTENDANCE_JOB_NAME,
   CONFIRM_METHOD,
+  RATE_LIMITS,
 } from '@chibatech/shared';
 import { validateStateChangingRequest } from '@/lib/api-guard';
 import { attendanceQueue } from '@/lib/attendance-queue';
+import { rateLimiter } from '@/lib/rate-limiter';
 
 // WHY: 認証情報・出席記録に関わるため Next.js キャッシュを無効化
 export const dynamic = 'force-dynamic';
@@ -37,6 +39,28 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const userId = session.user.id;
+
+  // 2.5 レートリミット (認証済みユーザ単位)
+  // WHY: 認証済みでも /api/attendance/submit を連打すると BullMQ enqueue + DB read が
+  // 圧迫される。jobId 衝突で実行 attend は一意に収束するが、ハンドラ自体の負荷は
+  // 残るのでここで弾く。
+  const rateResult = await rateLimiter.check(
+    `attend-submit:${userId}`,
+    RATE_LIMITS.attendanceSubmit
+  );
+  if (!rateResult.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(
+            Math.ceil((rateResult.resetAt.getTime() - Date.now()) / 1000)
+          ),
+        },
+      }
+    );
+  }
 
   // 3. body の Zod 検証 (untrusted 入力)
   let body: unknown;
@@ -62,6 +86,10 @@ export async function POST(request: Request) {
         dayOfWeek: true,
         period: true,
         room: true,
+        // WHY: queue payload に詰めて Worker 入口の zod (className.min(1)) を
+        // 通すために必要。Worker は内部で再度 DB から取得するが、payload を
+        // 空にすると schema 違反で全 confirm ジョブが parse 段階で死ぬ。
+        className: true,
         user: { select: { encryptedCitCreds: true } },
       },
     }),
@@ -119,8 +147,18 @@ export async function POST(request: Request) {
       userId,
       timetableId,
       roomId,
-      className: '', // worker 側で timetable から取得するので空でも可
+      // WHY: Worker 入口の zod (className.min(1)) を満たすため timetable 実値を
+      // 詰める。Worker は内部で sanitize 用に DB から再取得するが、payload を
+      // 空にすると schema parse で reject → ジョブが Worker に到達しない。
+      className: timetable.className,
       method: CONFIRM_METHOD,
+      // WHY: ユーザが UI で確認した classDate を payload に乗せる。Worker が
+      // new Date() で再計算すると、遅延ジョブ実行時に「実行日 ≠ 確認日」となり
+      // 別日の出席を送ってしまう (replay protection が機能しない)。
+      // ここでは zod 検証済みの raw 文字列をそのまま渡す。`.toISOString().slice(0,10)`
+      // 経由だと UTC 変換で前日にズレる (JST 環境で 2026-05-04 → 2026-05-03) ため
+      // 文字列を維持し、Worker 側で同じ規約で再 parse する。
+      classDate: parsed.data.classDate,
     },
     {
       jobId,

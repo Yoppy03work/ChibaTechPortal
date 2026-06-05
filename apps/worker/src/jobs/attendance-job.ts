@@ -52,6 +52,17 @@ const attendanceJobDataSchema = z.object({
   className: z.string().min(1),
   // WHY: 後方互換のため optional。未指定時は 'auto'（旧来の Scheduler 経路）扱い
   method: attendanceModeSchema.optional(),
+  // WHY: confirm モードの「ユーザが UI で確認した日」を Producer 側から
+  // 受け継ぐ。遅延ジョブ実行時に new Date() で再計算すると別日の出席を
+  // 送る (replay protection が無効化) ため、payload で運ぶのが正解。
+  // ISO 8601 文字列 (YYYY-MM-DD or full ISO)。未指定時は実行時刻から算出。
+  classDate: z
+    .string()
+    .min(1)
+    .refine((s) => !Number.isNaN(Date.parse(s)), {
+      message: 'classDate must be a valid ISO date string',
+    })
+    .optional(),
 });
 
 type AttendanceJobData = z.infer<typeof attendanceJobDataSchema>;
@@ -89,7 +100,11 @@ export async function processAttendanceJob(
   // 実質ここに来るのは将来の経路のみ)。
   const method: AttendanceMode = parsed.data.method ?? 'auto';
   const now = new Date();
-  const classDate = toClassDate(now);
+  // WHY: payload で classDate が来ていればそれを優先 (confirm モードの replay
+  // protection)。未指定 (旧 auto Scheduler 経路) は実行時刻ベース。
+  const classDate = parsed.data.classDate
+    ? toClassDate(new Date(parsed.data.classDate))
+    : toClassDate(now);
 
   // 2. timetable を取得 (DB のみ)
   const timetable = await prisma.timetable.findUnique({
