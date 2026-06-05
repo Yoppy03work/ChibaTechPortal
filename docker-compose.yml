@@ -14,6 +14,10 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # WHY: `.env.test` が要求する chibatech_portal_test を初回起動時に追加作成する。
+      # POSTGRES_DB は chibatech_portal しか作らないため、init SQL で test 用 DB を
+      # 並列に作る。既存ボリューム再利用時は実行されないので手動 CREATE が必要。
+      - ./packages/db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
