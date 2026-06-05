@@ -13,12 +13,12 @@ import {
 
 function validInput(): ConfirmSubmitGuardInput {
   // 1限ターゲット (9:25 = 9:30 - 5) で月曜
-  const now = new Date(2026, 4, 4, 9, 25, 0); // 月曜
+  const now = new Date('2026-05-04T09:25:00+09:00'); // 月曜
   return {
     jobUserId: 'user-1',
     jobTimetableId: 'tt-1',
     jobRoomId: '8109',
-    jobClassDate: new Date(2026, 4, 4),
+    jobClassDate: new Date('2026-05-04T00:00:00+09:00'),
     timetableUserId: 'user-1',
     timetableRoom: '8109',
     timetableDayOfWeek: 1,
@@ -64,7 +64,7 @@ describe('evaluateConfirmSubmitGuard', () => {
     // 昨日を指定
     const r = evaluateConfirmSubmitGuard({
       ...validInput(),
-      jobClassDate: new Date(2026, 4, 3),
+      jobClassDate: new Date('2026-05-03T00:00:00+09:00'),
     });
     expect(r).toEqual({ allowed: false, reason: 'class_date_mismatch' });
   });
@@ -72,9 +72,9 @@ describe('evaluateConfirmSubmitGuard', () => {
   it('時刻ウィンドウ外 (9:22 = -3 分) なら outside_time_window', () => {
     const r = evaluateConfirmSubmitGuard({
       ...validInput(),
-      now: new Date(2026, 4, 4, 9, 22, 0),
+      now: new Date('2026-05-04T09:22:00+09:00'),
       // jobClassDate は同日のままにする
-      jobClassDate: new Date(2026, 4, 4),
+      jobClassDate: new Date('2026-05-04T00:00:00+09:00'),
     });
     expect(r).toEqual({ allowed: false, reason: 'outside_time_window' });
   });
@@ -82,8 +82,8 @@ describe('evaluateConfirmSubmitGuard', () => {
   it('±2 分許容内 (9:27 = +2 分) なら通過', () => {
     const r = evaluateConfirmSubmitGuard({
       ...validInput(),
-      now: new Date(2026, 4, 4, 9, 27, 0),
-      jobClassDate: new Date(2026, 4, 4),
+      now: new Date('2026-05-04T09:27:00+09:00'),
+      jobClassDate: new Date('2026-05-04T00:00:00+09:00'),
     });
     expect(r).toEqual({ allowed: true });
   });

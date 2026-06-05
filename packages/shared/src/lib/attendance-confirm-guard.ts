@@ -57,25 +57,75 @@ const PERIOD_START_TIMES: Record<number, { hour: number; minute: number }> = {
 const ATTENDANCE_LEAD_MINUTES = 5;
 const ATTENDANCE_WINDOW_TOLERANCE_MINUTES = 2;
 
+// WHY: 千葉工大の授業時刻は JST 固定。Worker / Web のコンテナ TZ
+// (Dockerfile/compose で TZ 未指定なら UTC) に依存して `now.getHours()` を使うと、
+// 1 限 09:25 JST 送信が UTC 00:25 として `outside_time_window` で reject される。
+// Intl.DateTimeFormat で Asia/Tokyo に正規化してから時/分/曜日を取り出す。
+const JST_PARTS_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Tokyo',
+  hour12: false,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  weekday: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+const DAY_OF_WEEK_MAP: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+function getJstParts(date: Date): {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  dayOfWeek: number;
+} {
+  const parts = JST_PARTS_FORMATTER.formatToParts(date);
+  const pick = (type: string) =>
+    parts.find((p) => p.type === type)?.value ?? '';
+  // WHY: Intl は en-US で hour: '2-digit' / hour12: false にすると "24" を
+  // 真夜中で返す実装がある (Chrome/Node の挙動)。% 24 で 0 に正規化する。
+  const rawHour = parseInt(pick('hour'), 10);
+  return {
+    year: parseInt(pick('year'), 10),
+    month: parseInt(pick('month'), 10),
+    day: parseInt(pick('day'), 10),
+    hour: rawHour % 24,
+    minute: parseInt(pick('minute'), 10),
+    dayOfWeek: DAY_OF_WEEK_MAP[pick('weekday')] ?? 0,
+  };
+}
+
 function isInAttendanceWindow(
   now: Date,
   dayOfWeek: number,
   period: number
 ): boolean {
-  if (now.getDay() !== dayOfWeek) return false;
+  const jst = getJstParts(now);
+  if (jst.dayOfWeek !== dayOfWeek) return false;
   const start = PERIOD_START_TIMES[period];
   if (!start) return false;
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const currentMinutes = jst.hour * 60 + jst.minute;
   const targetMinutes = start.hour * 60 + start.minute - ATTENDANCE_LEAD_MINUTES;
   return Math.abs(currentMinutes - targetMinutes) <= ATTENDANCE_WINDOW_TOLERANCE_MINUTES;
 }
 
 function isSameDate(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+  // WHY: 両方とも JST のカレンダー日で比較。コンテナ TZ に依存して別日と
+  // 判定されるのを防ぐ。
+  const ja = getJstParts(a);
+  const jb = getJstParts(b);
+  return ja.year === jb.year && ja.month === jb.month && ja.day === jb.day;
 }
 
 /**

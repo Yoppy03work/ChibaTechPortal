@@ -20,6 +20,7 @@ import {
   ATTENDANCE_JOB_NAME,
   CONFIRM_METHOD,
   RATE_LIMITS,
+  normalizeAttendanceSettings,
 } from '@chibatech/shared';
 import { validateStateChangingRequest } from '@/lib/api-guard';
 import { attendanceQueue } from '@/lib/attendance-queue';
@@ -90,7 +91,12 @@ export async function POST(request: Request) {
         // 通すために必要。Worker は内部で再度 DB から取得するが、payload を
         // 空にすると schema 違反で全 confirm ジョブが parse 段階で死ぬ。
         className: true,
-        user: { select: { encryptedCitCreds: true } },
+        // WHY: フロントの ConfirmFlow は mode≠confirm では hide されるだけ。
+        // 直接 POST (curl 等) で auto/manual ユーザの confirm 経路を起動させない
+        // ため、サーバ側で attendanceSettings.mode を確認する。
+        user: {
+          select: { encryptedCitCreds: true, attendanceSettings: true },
+        },
       },
     }),
     prisma.attendanceLog.findFirst({
@@ -110,9 +116,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid timetable' }, { status: 400 });
   }
 
-  // 5. confirm-guard (サーバー側検証)
+  // 5. confirm-guard (サーバー側検証) — ownership/room/date/time/duplicate/creds
   // WHY: フロントの ConfirmFlow と Worker 入口、本ハンドラの 3 箇所で同じ判定を
-  // 通すことで、どこか 1 つを通り抜けても他で reject される設計
+  // 通すことで、どこか 1 つを通り抜けても他で reject される設計。
+  // ownership (timetable_not_owned) はここで最初に reject される。
   const guardResult = evaluateConfirmSubmitGuard({
     jobUserId: userId,
     jobTimetableId: timetableId,
@@ -136,10 +143,37 @@ export async function POST(request: Request) {
     );
   }
 
+  // 5.5 attendance mode のサーバ側検証 (ownership 確認 *後* に行う)
+  // WHY: フロントの ConfirmFlow を hide するだけだと curl 直叩きで auto/manual
+  // ユーザの confirm 経路を起動できてしまう。サーバ側で mode='confirm' でない
+  // 場合は 400 で拒否する (二重防衛)。
+  // WHY (順序): mode-check を guard より前に置くと、他人の timetableId を送った
+  // 攻撃者に対し mode によって応答が変わり (`not_in_confirm_mode` vs
+  // `timetable_not_owned`)、被害者の mode が漏れる。ownership 失敗を guard で
+  // 先に弾いてから mode を見ることで応答を一定にする。
+  const storedMode = normalizeAttendanceSettings(
+    timetable.user.attendanceSettings
+  ).mode;
+  if (storedMode !== 'confirm') {
+    return NextResponse.json(
+      { error: 'submit_blocked', reason: 'not_in_confirm_mode' },
+      { status: 400 }
+    );
+  }
+
   // 6. BullMQ にジョブを enqueue (外部 HTTP は worker が実行)
-  // WHY: jobId を timetableId + classDate + method の組み合わせで一意化することで、
-  // 同一クラスへの二重 enqueue を BullMQ 側でも軽く防ぐ (DB 重複防止と二重防衛)
-  const jobId = `confirm:${userId}:${timetableId}:${toClassDate(classDateObj).toISOString().slice(0, 10)}`;
+  // WHY: jobId を「同一クラス・同日」で一意化することで、同一クラスへの二重
+  // enqueue を BullMQ 側でも軽く防ぐ (DB 重複防止と二重防衛)。
+  // セパレータは `-` を使う: BullMQ 内部キーは `bull:<queue>:<jobId>` の形で
+  // `:` を区切りに使うため、custom jobId に `:` を混ぜると Redis キー解析の
+  // 混乱を招く可能性がある (Codex 指摘)。
+  // WHY (consistency): jobId は existingSuccess 検索 / 監査ログ書き込みで使う
+  // `toClassDate(classDateObj)` と同じ Date を Y-M-D 化する。raw 文字列を
+  // slice したり別 TZ で正規化したりすると、同一カレンダー日 (DB 視点) でも
+  // jobId が分裂して BullMQ 重複防御をバイパスする (Codex 指摘)。
+  const classDateForKey = toClassDate(classDateObj);
+  const classDateYmd = formatYmdLocal(classDateForKey);
+  const jobId = `confirm-${userId}-${timetableId}-${classDateYmd}`;
 
   await attendanceQueue.add(
     ATTENDANCE_JOB_NAME,
@@ -162,8 +196,13 @@ export async function POST(request: Request) {
     },
     {
       jobId,
+      // WHY: 成功ジョブは履歴として 100 件残す (運用デバッグ用)
       removeOnComplete: 100,
-      removeOnFail: 100,
+      // WHY: 失敗ジョブを残すと jobId が同一の再試行が「重複」として silently
+      // 弾かれ、API は 202 を返すのに Worker が走らない状態になる。
+      // append-only な AttendanceAuditLog に失敗履歴は残るため、BullMQ の
+      // failed セットは即座に解放してユーザの再試行を可能にする。
+      removeOnFail: true,
     }
   );
 
@@ -174,4 +213,14 @@ function toClassDate(date: Date): Date {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
   return d;
+}
+
+// WHY: toClassDate() の結果 (ローカル TZ 00:00) を `YYYY-MM-DD` に整形する。
+// DB query で使う Date と同じ抽出源を使うことで、jobId と
+// `existingSuccess`/`attendanceLog.classDate` のキャレンダー日を一致させる。
+function formatYmdLocal(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }

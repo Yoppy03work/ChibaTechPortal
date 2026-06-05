@@ -47,8 +47,10 @@ vi.mock('@/lib/rate-limiter', () => ({
 
 import { POST } from '@/app/api/attendance/submit/route';
 
-// 1 限 9:30 開始 - 5 分 = 9:25 がターゲット (月曜)
-const IN_WINDOW = new Date(2026, 4, 4, 9, 25, 0);
+// 1 限 9:30 開始 - 5 分 = 9:25 がターゲット (月曜) — JST 固定で TZ 非依存
+// WHY: confirm-guard は Asia/Tokyo で評価する。テスト側もコンテナ TZ (CI=UTC) に
+// 依らないよう JST 明示で system time を固定する。
+const IN_WINDOW = new Date('2026-05-04T09:25:00+09:00');
 const TODAY_ISO = '2026-05-04';
 
 function makeReq(body: unknown): Request {
@@ -79,6 +81,7 @@ function timetableRow(overrides: Partial<{
   room: string | null;
   encryptedCitCreds: Buffer | null;
   className: string;
+  attendanceSettings: unknown;
 }> = {}) {
   return {
     id: 'tt-1',
@@ -92,6 +95,12 @@ function timetableRow(overrides: Partial<{
         overrides.encryptedCitCreds === undefined
           ? Buffer.from('encrypted')
           : overrides.encryptedCitCreds,
+      // WHY: API は mode='confirm' でないと弾く (mode gate)。
+      // デフォルトは confirm 想定、mode-gate テストでだけ別 mode に差し替える。
+      attendanceSettings:
+        overrides.attendanceSettings === undefined
+          ? { mode: 'confirm' }
+          : overrides.attendanceSettings,
     },
   };
 }
@@ -188,6 +197,33 @@ describe('POST /api/attendance/submit — guard reject', () => {
     expect(queueAdd).not.toHaveBeenCalled();
   });
 
+  // WHY: フロントは ConfirmFlow を mode≠confirm では hide するだけ。curl 直叩きで
+  // auto/manual ユーザの confirm 経路が起動する穴を、サーバ側で塞ぐ (Codex P2 指摘)。
+  it('mode が confirm でなければ 400 + reason=not_in_confirm_mode', async () => {
+    authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    timetableFindUnique.mockResolvedValue(
+      timetableRow({ attendanceSettings: { mode: 'auto' } })
+    );
+    const res = await POST(makeReq(validBody()));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe('submit_blocked');
+    expect(body.reason).toBe('not_in_confirm_mode');
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
+  it('mode が manual でも 400 + reason=not_in_confirm_mode', async () => {
+    authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    timetableFindUnique.mockResolvedValue(
+      timetableRow({ attendanceSettings: { mode: 'manual' } })
+    );
+    const res = await POST(makeReq(validBody()));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.reason).toBe('not_in_confirm_mode');
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
   it('room mismatch (PR #15 残リスク) で 400 + reason=room_mismatch', async () => {
     // WHY: PR #15 Codex 指摘の「サーバー側でも送信不可にする必要」を満たす
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
@@ -232,7 +268,7 @@ describe('POST /api/attendance/submit — guard reject', () => {
   });
 
   it('時刻ウィンドウ外で 400 + reason=outside_time_window', async () => {
-    vi.setSystemTime(new Date(2026, 4, 4, 9, 22, 0));
+    vi.setSystemTime(new Date('2026-05-04T09:22:00+09:00'));
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
     timetableFindUnique.mockResolvedValue(timetableRow());
     const res = await POST(makeReq(validBody()));
@@ -281,7 +317,12 @@ describe('POST /api/attendance/submit — 成功パス', () => {
       classDate: TODAY_ISO,
     });
     // jobId で同日同 timetable を一意化 (二重 enqueue 防止)
-    expect(opts.jobId).toContain('confirm:user-1:tt-1:');
+    // WHY: BullMQ の内部 Redis キーが `bull:<queue>:<jobId>` 形式で `:` を
+    // セパレータに使うため、custom jobId は `-` で構成する。
+    expect(opts.jobId).toBe(`confirm-user-1-tt-1-${TODAY_ISO}`);
+    // WHY: 失敗ジョブが残ると同 jobId の再試行が silently 弾かれるため、
+    // removeOnFail は即時 (true) にしてユーザの retry を可能にする。
+    expect(opts.removeOnFail).toBe(true);
   });
 
   it('成功時に外部 HTTP は発生しない (Queue.add のみ)', async () => {
