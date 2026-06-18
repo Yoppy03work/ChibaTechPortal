@@ -7,8 +7,17 @@ services:
       POSTGRES_DB: chibatech_portal
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    ports:
+      # WHY: ホスト側からの `npm test` (packages/db の Prisma 統合テスト) と
+      # `prisma migrate dev` が 5432 に届く必要がある。LAN 非公開を維持するため
+      # ループバックに束縛する (web の 127.0.0.1:3001 と同じ思想)。
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # WHY: `.env.test` が要求する chibatech_portal_test を初回起動時に追加作成する。
+      # POSTGRES_DB は chibatech_portal しか作らないため、init SQL で test 用 DB を
+      # 並列に作る。既存ボリューム再利用時は実行されないので手動 CREATE が必要。
+      - ./packages/db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -19,6 +28,10 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    ports:
+      # WHY: ホスト側のレートリミッタ/BullMQ がローカル開発で 6379 に届く必要がある。
+      # LAN 非公開を維持するためループバックに束縛する。
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -42,7 +55,13 @@ services:
       - REDIS_URL=redis://redis:6379
       - NODE_ENV=development
     env_file:
-      - .env
+      # WHY: .env は tracked されておらず初回 checkout 直後は存在しない。
+      # `docker compose up postgres redis` だけ実行する経路 (test DB セットアップ)
+      # でも compose parser はファイル存在を要求するため、optional 化する。
+      # web/worker サービス起動時には .env が無くてもエラーにならず、
+      # 必要な変数は environment セクション + シェル env から埋まる。
+      - path: .env
+        required: false
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,7 +87,13 @@ services:
       - REDIS_URL=redis://redis:6379
       - NODE_ENV=development
     env_file:
-      - .env
+      # WHY: .env は tracked されておらず初回 checkout 直後は存在しない。
+      # `docker compose up postgres redis` だけ実行する経路 (test DB セットアップ)
+      # でも compose parser はファイル存在を要求するため、optional 化する。
+      # web/worker サービス起動時には .env が無くてもエラーにならず、
+      # 必要な変数は environment セクション + シェル env から埋まる。
+      - path: .env
+        required: false
     depends_on:
       postgres:
         condition: service_healthy
