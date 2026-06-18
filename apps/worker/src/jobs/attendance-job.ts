@@ -25,6 +25,7 @@ import {
   evaluateAttendanceAutoGuard,
   evaluateAttendanceAutoGuardPreNetwork,
   evaluateConfirmSubmitGuard,
+  formatJstYmd,
   toAttendanceAuditLogCreateData,
   ATTENDANCE_QUEUE_NAME as SHARED_ATTENDANCE_QUEUE_NAME,
 } from '@chibatech/shared';
@@ -105,6 +106,13 @@ export async function processAttendanceJob(
   const classDate = parsed.data.classDate
     ? toClassDate(new Date(parsed.data.classDate))
     : toClassDate(now);
+  // WHY: confirm guard の classDate 一致判定は host TZ 非依存の JST `YYYY-MM-DD`
+  // 文字列で行う。toClassDate(Date) は setHours で host TZ truncate するため
+  // guard には渡さず、payload 由来の日 (無ければ now) を formatJstYmd で JST 日に
+  // 正規化して渡す。
+  const classDateYmd = parsed.data.classDate
+    ? formatJstYmd(new Date(parsed.data.classDate))
+    : formatJstYmd(now);
 
   // 2. timetable を取得 (DB のみ)
   const timetable = await prisma.timetable.findUnique({
@@ -163,6 +171,7 @@ export async function processAttendanceJob(
     timetableId,
     roomId,
     classDate,
+    classDateYmd,
     now,
     timetable,
     existingSuccess,
@@ -313,6 +322,8 @@ interface MethodGuardInput {
   timetableId: string;
   roomId: string;
   classDate: Date;
+  // WHY: confirm guard 用の JST カレンダー日 (`YYYY-MM-DD`)。host TZ 非依存。
+  classDateYmd: string;
   now: Date;
   timetable: {
     userId: string;
@@ -409,7 +420,7 @@ async function evaluateConfirmMethodGuard(
     jobUserId: input.userId,
     jobTimetableId: input.timetableId,
     jobRoomId: input.roomId,
-    jobClassDate: input.classDate,
+    jobClassDateYmd: input.classDateYmd,
     timetableUserId: input.timetable.userId,
     timetableRoom: input.timetable.room,
     timetableDayOfWeek: input.timetable.dayOfWeek,
