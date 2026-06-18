@@ -9,9 +9,11 @@ services:
       POSTGRES_PASSWORD: postgres
     ports:
       # WHY: ホスト側からの `npm test` (packages/db の Prisma 統合テスト) と
-      # `prisma migrate dev` が 5432 に届く必要がある。LAN 非公開を維持するため
+      # `prisma migrate dev` が届く必要がある。LAN 非公開を維持するため
       # ループバックに束縛する (web の 127.0.0.1:3001 と同じ思想)。
-      - "127.0.0.1:5432:5432"
+      # WHY (host port): 既定は 5432。別プロジェクトと衝突する環境では .env の
+      # POSTGRES_HOST_PORT で逃がせる (コンテナ内は常に 5432)。
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # WHY: `.env.test` が要求する chibatech_portal_test を初回起動時に追加作成する。
