@@ -287,6 +287,29 @@ describe('processAttendanceJob — pre-network reject 時のログ/通知', () =
     // ユーザー通知が走る
     expect(notifyAdd).toHaveBeenCalledTimes(1);
   });
+
+  // WHY: 重複/リトライ ジョブが既存の success 行を skipped で潰す回帰を防ぐ。
+  // existingSuccess があると preGuard が alreadySubmitted で reject し、続く
+  // saveLog('skipped', ...) が呼ばれる。このとき updateMany の where に
+  // `NOT: { status: 'success' }` が入っていないと、唯一マッチする success 行が
+  // skipped に上書きされてしまう (出席済みなのに未提出に見える)。
+  it('既に同方式の success 行があるとき、skipped の updateMany は success 行を対象外にする', async () => {
+    delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    // 既存の success 行を擬似的に返す → preGuard が alreadySubmitted=true で reject
+    attendanceLogFindFirst.mockResolvedValue({ id: 'existing-success' });
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'dup-1', data: validJobData() }, adapter);
+
+    const skippedUpdate = attendanceLogUpdateMany.mock.calls.find(
+      (c) => (c[0] as { data: { status: string } }).data.status === 'skipped'
+    );
+    expect(skippedUpdate).toBeDefined();
+
+    const where = (skippedUpdate![0] as { where: Record<string, unknown> }).where;
+    expect(where).toMatchObject({ NOT: { status: 'success' } });
+  });
 });
 
 // ============================================================
