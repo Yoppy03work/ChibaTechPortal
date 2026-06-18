@@ -136,3 +136,20 @@ export {
   type AttendanceTargetResolution,
   resolveAttendanceTarget,
 } from './lib/attendance-target';
+
+export {
+  type ConfirmSubmitGuardInput,
+  type ConfirmSubmitGuardResult,
+  evaluateConfirmSubmitGuard,
+  CONFIRM_METHOD,
+} from './lib/attendance-confirm-guard';
+
+export {
+  type ConfirmSubmitInput,
+  confirmSubmitInputSchema,
+} from './lib/attendance-confirm-input';
+
+export {
+  ATTENDANCE_QUEUE_NAME,
+  ATTENDANCE_JOB_NAME,
+} from './lib/attendance-queue-names';
