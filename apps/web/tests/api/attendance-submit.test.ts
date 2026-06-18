@@ -246,6 +246,27 @@ describe('POST /api/attendance/submit — guard reject', () => {
     expect(queueAdd).not.toHaveBeenCalled();
   });
 
+  it('非所有 timetable は owner の mode によらず timetable_not_owned を返す (mode 漏洩防止・順序固定)', async () => {
+    // WHY: route は ownership(guard) を mode-gate より先に判定する。これにより
+    // 攻撃者が他人の timetableId を POST しても、被害者の attendanceSettings.mode
+    // (auto/manual/confirm) を応答コードの差分から推定できない。
+    // mode-check を guard より前に動かすリファクタが入ると、非所有かつ非 confirm の
+    // owner に対して not_in_confirm_mode が漏れる。このテストはその順序を pin する。
+    // 既存の timetable_not_owned テストは owner が default の confirm モードのため、
+    // mode を先に評価しても結果が変わらず順序回帰を検出できない点を補完する。
+    authMock.mockResolvedValue({ user: { id: 'user-1' } });
+    timetableFindUnique.mockResolvedValue(
+      timetableRow({ userId: 'attacker', attendanceSettings: { mode: 'auto' } })
+    );
+    const res = await POST(makeReq(validBody()));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.reason).toBe('timetable_not_owned');
+    // owner が auto モードであることを漏らさない (mode-gate より ownership が先)
+    expect(body.reason).not.toBe('not_in_confirm_mode');
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
   it('同日 confirm 重複ありで 400 + reason=already_submitted', async () => {
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
     timetableFindUnique.mockResolvedValue(timetableRow());

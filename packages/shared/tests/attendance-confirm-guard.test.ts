@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   evaluateConfirmSubmitGuard,
+  formatJstYmd,
   type ConfirmSubmitGuardInput,
 } from '../src/lib/attendance-confirm-guard';
 
@@ -18,7 +19,7 @@ function validInput(): ConfirmSubmitGuardInput {
     jobUserId: 'user-1',
     jobTimetableId: 'tt-1',
     jobRoomId: '8109',
-    jobClassDate: new Date('2026-05-04T00:00:00+09:00'),
+    jobClassDateYmd: '2026-05-04',
     timetableUserId: 'user-1',
     timetableRoom: '8109',
     timetableDayOfWeek: 1,
@@ -64,7 +65,7 @@ describe('evaluateConfirmSubmitGuard', () => {
     // 昨日を指定
     const r = evaluateConfirmSubmitGuard({
       ...validInput(),
-      jobClassDate: new Date('2026-05-03T00:00:00+09:00'),
+      jobClassDateYmd: '2026-05-03',
     });
     expect(r).toEqual({ allowed: false, reason: 'class_date_mismatch' });
   });
@@ -73,8 +74,8 @@ describe('evaluateConfirmSubmitGuard', () => {
     const r = evaluateConfirmSubmitGuard({
       ...validInput(),
       now: new Date('2026-05-04T09:22:00+09:00'),
-      // jobClassDate は同日のままにする
-      jobClassDate: new Date('2026-05-04T00:00:00+09:00'),
+      // jobClassDateYmd は同日のままにする
+      jobClassDateYmd: '2026-05-04',
     });
     expect(r).toEqual({ allowed: false, reason: 'outside_time_window' });
   });
@@ -83,7 +84,7 @@ describe('evaluateConfirmSubmitGuard', () => {
     const r = evaluateConfirmSubmitGuard({
       ...validInput(),
       now: new Date('2026-05-04T09:27:00+09:00'),
-      jobClassDate: new Date('2026-05-04T00:00:00+09:00'),
+      jobClassDateYmd: '2026-05-04',
     });
     expect(r).toEqual({ allowed: true });
   });
@@ -102,6 +103,36 @@ describe('evaluateConfirmSubmitGuard', () => {
       hasCitCreds: false,
     });
     expect(r).toEqual({ allowed: false, reason: 'credentials_not_registered' });
+  });
+
+  it('class_date 判定は host TZ ではなく JST のカレンダー日で行う (TZ非依存・回帰防止)', () => {
+    // WHY: 旧実装は jobClassDate を toClassDate(new Date('YYYY-MM-DD')) で作り、
+    // host TZ の setHours で truncate してから JST 比較していた。負 UTC オフセットの
+    // ホスト (例: 米国 TZ の開発機) では JST 日とズレ、有効な confirm が全て
+    // class_date_mismatch で誤却下される回帰があった。文字列比較に変えて TZ 非依存に
+    // した本修正を固定する。
+    //
+    // now = 2026-05-04T15:30:00Z は JST では 2026-05-05 00:30。UTC 日 (05-04) ではなく
+    // JST 日 (05-05) で判定されることを 2 方向から固定する。
+    const now = new Date('2026-05-04T15:30:00Z');
+    expect(formatJstYmd(now)).toBe('2026-05-05');
+
+    // JST 日 (05-05) を渡すと date チェックは通過し、00:30 JST は授業ウィンドウ外
+    // なので後段の outside_time_window で落ちる (= class_date_mismatch では落ちない)。
+    const jstDay = evaluateConfirmSubmitGuard({
+      ...validInput(),
+      now,
+      jobClassDateYmd: '2026-05-05',
+    });
+    expect(jstDay).toEqual({ allowed: false, reason: 'outside_time_window' });
+
+    // UTC 日 (05-04) を渡すと JST 日 (05-05) と食い違い class_date_mismatch。
+    const utcDay = evaluateConfirmSubmitGuard({
+      ...validInput(),
+      now,
+      jobClassDateYmd: '2026-05-04',
+    });
+    expect(utcDay).toEqual({ allowed: false, reason: 'class_date_mismatch' });
   });
 
   it('複数条件 NG 時はチェック順最初の reason を返す (timetable_not_owned が優先)', () => {

@@ -19,7 +19,12 @@ export interface ConfirmSubmitGuardInput {
   jobUserId: string;
   jobTimetableId: string;
   jobRoomId: string;
-  jobClassDate: Date;
+  // WHY: ユーザーが確認した授業日を JST カレンダー日の `YYYY-MM-DD` 文字列で受ける。
+  // Date を渡して guard 内で host TZ 依存の truncate (setHours) をすると、負 UTC
+  // オフセットのホスト (例: 米国 TZ の開発機) で JST 日と食い違い、有効な confirm が
+  // class_date_mismatch で誤却下される。文字列で受けて formatJstYmd(now) と比較する
+  // ことで host TZ から完全に独立させる。
+  jobClassDateYmd: string;
   // --- DB 検証結果 ---
   timetableUserId: string;
   timetableRoom: string | null | undefined;
@@ -120,12 +125,19 @@ function isInAttendanceWindow(
   return Math.abs(currentMinutes - targetMinutes) <= ATTENDANCE_WINDOW_TOLERANCE_MINUTES;
 }
 
-function isSameDate(a: Date, b: Date): boolean {
-  // WHY: 両方とも JST のカレンダー日で比較。コンテナ TZ に依存して別日と
-  // 判定されるのを防ぐ。
-  const ja = getJstParts(a);
-  const jb = getJstParts(b);
-  return ja.year === jb.year && ja.month === jb.month && ja.day === jb.day;
+/**
+ * Date を JST のカレンダー日 `YYYY-MM-DD` に整形する。
+ *
+ * WHY: classDate 一致判定を host TZ 非依存にするための単一の正規化点。
+ * getJstParts (Asia/Tokyo) を通すので、コンテナ TZ が UTC でも負オフセットでも
+ * 常に JST のカレンダー日を返す。confirm 送信 API / Worker は確認日を payload の
+ * `YYYY-MM-DD` 文字列で運び、本関数で正規化した now と文字列比較する。
+ */
+export function formatJstYmd(date: Date): string {
+  const jst = getJstParts(date);
+  const m = String(jst.month).padStart(2, '0');
+  const d = String(jst.day).padStart(2, '0');
+  return `${jst.year}-${m}-${d}`;
 }
 
 /**
@@ -134,7 +146,7 @@ function isSameDate(a: Date, b: Date): boolean {
  * チェック順 (失敗時は最初の reason を返す):
  *   1. timetable の所有確認 (timetableUserId === jobUserId)
  *   2. 教室一致 (timetableRoom === jobRoomId)
- *   3. classDate の妥当性 (今日 === jobClassDate)
+ *   3. classDate の妥当性 (今日(JST) === jobClassDateYmd)
  *   4. 時刻ウィンドウ (授業開始 5 分前 ±2 分)
  *   5. 同日 confirm 重複なし (alreadySubmittedConfirm === false)
  *   6. 認証情報あり (hasCitCreds === true)
@@ -152,8 +164,9 @@ export function evaluateConfirmSubmitGuard(
 
   // WHY: classDate (ユーザー入力) と現在日付の整合性チェック。
   // 過去日・未来日の API 直叩きで「特定授業に対して別日に出席登録」を
-  // 偽装する経路を塞ぐ
-  if (!isSameDate(input.jobClassDate, input.now)) {
+  // 偽装する経路を塞ぐ。両辺とも JST カレンダー日の `YYYY-MM-DD` 文字列で
+  // 比較するため host TZ に依存しない。
+  if (input.jobClassDateYmd !== formatJstYmd(input.now)) {
     return { allowed: false, reason: 'class_date_mismatch' };
   }
 

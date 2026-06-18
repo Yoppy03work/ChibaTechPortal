@@ -141,6 +141,7 @@ export {
   type ConfirmSubmitGuardInput,
   type ConfirmSubmitGuardResult,
   evaluateConfirmSubmitGuard,
+  formatJstYmd,
   CONFIRM_METHOD,
 } from './lib/attendance-confirm-guard';
 

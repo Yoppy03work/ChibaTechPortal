@@ -124,7 +124,10 @@ export async function POST(request: Request) {
     jobUserId: userId,
     jobTimetableId: timetableId,
     jobRoomId: roomId,
-    jobClassDate: toClassDate(classDateObj),
+    // WHY: zod 検証済みの JST カレンダー日 (`YYYY-MM-DD`) をそのまま渡す。
+    // toClassDate(new Date(...)) 経由だと host TZ で setHours truncate され、
+    // 負オフセットのホストで JST 日とズレて class_date_mismatch を誤判定する。
+    jobClassDateYmd: parsed.data.classDate,
     timetableUserId: timetable.userId,
     timetableRoom: timetable.room,
     timetableDayOfWeek: timetable.dayOfWeek,
