@@ -24,7 +24,7 @@ function validInput(): AttendanceAutoGuardInput {
     jobRoomId: '8109',
     dayOfWeek: 1,
     period: 1,
-    now: new Date(2026, 4, 4, 9, 25, 0),
+    now: new Date('2026-05-04T09:25:00+09:00'),
     alreadySubmitted: false,
     qrSessionValid: true,
   };
@@ -71,13 +71,13 @@ describe('evaluateAttendanceAutoGuard', () => {
     // WHY: 1 限 9:30 開始 - 5 分 = 9:25 がターゲット。±2 分の許容幅外 (9:22 や 9:28) は reject
     const tooEarly = evaluateAttendanceAutoGuard({
       ...validInput(),
-      now: new Date(2026, 4, 4, 9, 22, 0),
+      now: new Date('2026-05-04T09:22:00+09:00'),
     });
     expect(tooEarly.allowed).toBe(false);
 
     const tooLate = evaluateAttendanceAutoGuard({
       ...validInput(),
-      now: new Date(2026, 4, 4, 9, 28, 0),
+      now: new Date('2026-05-04T09:28:00+09:00'),
     });
     expect(tooLate.allowed).toBe(false);
   });
@@ -93,7 +93,9 @@ describe('evaluateAttendanceAutoGuard', () => {
   ])('授業開始 5 分前 ±2 分の範囲 (%s = %d:%d) は許可する', (_label, hour, minute) => {
     const result = evaluateAttendanceAutoGuard({
       ...validInput(),
-      now: new Date(2026, 4, 4, hour, minute, 0),
+      now: new Date(
+        `2026-05-04T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+09:00`
+      ),
     });
     expect(result).toEqual({ allowed: true });
   });
@@ -139,7 +141,7 @@ function validPreNetworkInput(): AttendanceAutoGuardPreNetworkInput {
     jobRoomId: '8109',
     dayOfWeek: 1,
     period: 1,
-    now: new Date(2026, 4, 4, 9, 25, 0),
+    now: new Date('2026-05-04T09:25:00+09:00'),
     alreadySubmitted: false,
     qrSessionValid: true,
   };
@@ -173,7 +175,7 @@ describe('evaluateAttendanceAutoGuardPreNetwork', () => {
     ['storedMode !== auto', { storedMode: 'manual' as const }],
     ['ユーザー不一致', { jobUserId: 'attacker' }],
     ['教室不一致', { jobRoomId: '0000' }],
-    ['対象時刻外', { now: new Date(2026, 4, 4, 8, 0, 0) }],
+    ['対象時刻外', { now: new Date('2026-05-04T08:00:00+09:00') }],
     ['すでに送信済み', { alreadySubmitted: true }],
   ])('条件不足 (%s) なら healthCheck 前に拒否する', (_label, override) => {
     const result = evaluateAttendanceAutoGuardPreNetwork({

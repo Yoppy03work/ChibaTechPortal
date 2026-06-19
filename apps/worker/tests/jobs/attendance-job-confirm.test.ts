@@ -163,6 +163,19 @@ describe('processAttendanceJob — method=confirm 成功パス', () => {
     expect(adapter.attend).toHaveBeenCalledWith('cit-id', 'cit-pw', '8109');
   });
 
+  it('ATTENDANCE_AUTO_DRY_RUN=true でも confirm は実送信する (dry-run は auto 専用)', async () => {
+    // WHY: dry-run は auto 専用の安全弁。confirm はユーザ起点なので常に実送信する。
+    process.env.ATTENDANCE_AUTO_DRY_RUN = 'true';
+    try {
+      timetableFindUnique.mockResolvedValue(timetableRow());
+      const adapter = makeAdapter();
+      await processAttendanceJob({ id: 'c-dry', data: confirmJobData() }, adapter);
+      expect(adapter.attend).toHaveBeenCalledTimes(1);
+    } finally {
+      delete process.env.ATTENDANCE_AUTO_DRY_RUN;
+    }
+  });
+
   it('成功時に pre_attempt → post_attempt の 2 監査ログ + AttendanceLog success が記録される', async () => {
     timetableFindUnique.mockResolvedValue(timetableRow());
     const adapter = makeAdapter();

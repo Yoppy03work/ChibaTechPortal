@@ -15,6 +15,7 @@ import {
 import { scrapeQueue } from './scrape-job';
 import { attendanceQueue } from './attendance-job';
 import { notifyQueue } from './notify-job';
+import { isAutoExecutionEnabled, isUserAllowlisted } from '../lib/attendance-rollout';
 
 const SCRAPE_INTERVAL_MS = 15 * 60 * 1000; // 15分
 const ATTENDANCE_CHECK_INTERVAL_MS = 60 * 1000; // 1分（授業時間チェック）
@@ -86,10 +87,17 @@ export async function enqueueScrapeJobs() {
  * WHY: 1分間隔でチェックし、現在時刻が「授業開始5分前」に該当する時限があれば
  * その時限の授業を持つユーザーの出席ジョブを投入する。
  */
-async function enqueueAttendanceJobs() {
+export async function enqueueAttendanceJobs() {
   const now = new Date();
-  const dayOfWeek = now.getDay(); // 0=日, 1=月, ..., 6=土
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  // WHY: 授業時刻は JST 固定。コンテナ TZ (UTC 等) に依存しないよう JST で判定する。
+  const jst = getJstParts(now);
+  const dayOfWeek = jst.dayOfWeek;
+  const currentMinutes = jst.hour * 60 + jst.minute;
+  const ymd = `${jst.year}-${String(jst.month).padStart(2, '0')}-${String(
+    jst.day
+  ).padStart(2, '0')}`;
+  // WHY: @db.Date キー。qr-validate / Worker と同じく JST 日の UTC midnight で揃える。
+  const classDate = new Date(ymd);
 
   // 各時限をチェック: 授業開始5分前かどうか
   for (const [periodStr, startTime] of Object.entries(PERIOD_START_TIMES)) {
@@ -120,23 +128,40 @@ async function enqueueAttendanceJobs() {
     });
 
     for (const tt of timetables) {
-      // WHY: フェーズ0段階では Scheduler から自動送信は行わない。
-      // confirm/manual はそもそも対象外。auto は 6条件チェック + 監査ログが
-      // 実装される PR4 で解禁する（memory: feedback_attendance_auto_guard.md）。
-      // それまではユーザー設定が auto でもジョブ投入をブロックする安全装置として機能する。
+      // WHY: Scheduler 投入対象は auto のみ。confirm/manual は UI 側で完結。
       const { mode } = normalizeAttendanceSettings(tt.user.attendanceSettings);
       if (mode !== 'auto') continue;
 
-      // TODO(PR4): 6条件チェックを通過したときだけ下記を実行する
-      //   if (!tt.user.encryptedCitCreds) continue;
-      //   if (!tt.room) continue;
-      //   await attendanceQueue.add('attend', {
-      //     userId: tt.userId, timetableId: tt.id, roomId: tt.room,
-      //     className: tt.className, method: mode,
-      //   });
-      console.log(
-        `[scheduler] auto mode is locked until PR4. skip user=${tt.userId} class=${tt.className}`
+      // 段階解禁フラグ (fail-closed)。既定では何も投入しない。Worker が最終ゲートとして
+      // 同条件 + QR セッションを再評価するので、Scheduler 投入は必要条件にすぎない。
+      if (!isAutoExecutionEnabled() || !isUserAllowlisted(tt.userId)) continue;
+      if (!tt.user.encryptedCitCreds) continue;
+      if (!tt.room) continue;
+
+      // 有効な QR セッション (期限内) が無ければ投入しない。
+      const session = await prisma.attendanceQrSession.findFirst({
+        where: { userId: tt.userId, roomId: tt.room, classDate, expiresAt: { gt: now } },
+      });
+      if (!session) continue;
+
+      await attendanceQueue.add(
+        'attend',
+        {
+          userId: tt.userId,
+          timetableId: tt.id,
+          roomId: tt.room,
+          className: tt.className,
+          method: 'auto',
+          // WHY: 実行日を payload で運び、Worker の new Date() 再計算による別日送信を防ぐ。
+          classDate: ymd,
+        },
+        {
+          jobId: `auto-${tt.userId}-${tt.id}-${ymd}`,
+          removeOnComplete: 100,
+          removeOnFail: true,
+        }
       );
+      console.log(`[scheduler] auto enqueued user=${tt.userId} class=${tt.className}`);
     }
   }
 }

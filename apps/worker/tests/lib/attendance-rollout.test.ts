@@ -43,12 +43,28 @@ describe('isUserAllowlisted (fail-closed)', () => {
   });
 });
 
-describe('isAutoDryRun', () => {
-  it('未設定なら false', () => {
+describe('isAutoDryRun (fail-toward-dry-run)', () => {
+  it('未設定なら false (= 実送信。enabled+allowlist が前提)', () => {
     expect(isAutoDryRun()).toBe(false);
   });
-  it("'true' のときだけ true", () => {
+  it("'true' なら dry-run", () => {
     vi.stubEnv('ATTENDANCE_AUTO_DRY_RUN', 'true');
+    expect(isAutoDryRun()).toBe(true);
+  });
+  it('明示的な false/0/no は実送信 (opt-out)', () => {
+    vi.stubEnv('ATTENDANCE_AUTO_DRY_RUN', 'false');
+    expect(isAutoDryRun()).toBe(false);
+    vi.stubEnv('ATTENDANCE_AUTO_DRY_RUN', '0');
+    expect(isAutoDryRun()).toBe(false);
+    vi.stubEnv('ATTENDANCE_AUTO_DRY_RUN', 'NO');
+    expect(isAutoDryRun()).toBe(false);
+  });
+  it('typo (tru / 1 / yes) は安全側 dry-run に倒す', () => {
+    vi.stubEnv('ATTENDANCE_AUTO_DRY_RUN', 'tru');
+    expect(isAutoDryRun()).toBe(true);
+    vi.stubEnv('ATTENDANCE_AUTO_DRY_RUN', '1');
+    expect(isAutoDryRun()).toBe(true);
+    vi.stubEnv('ATTENDANCE_AUTO_DRY_RUN', 'yes');
     expect(isAutoDryRun()).toBe(true);
   });
 });
