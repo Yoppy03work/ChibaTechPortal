@@ -90,6 +90,7 @@ export {
   type ScraperSession,
   type ScrapedNotificationItem,
   type ScrapedAssignment,
+  type ScrapedTimetableEntry,
   type ScraperAdapter,
   type AttendanceMode,
   type AttendanceDecision,
