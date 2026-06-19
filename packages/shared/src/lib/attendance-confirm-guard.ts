@@ -13,6 +13,11 @@
  * (timetableId + roomId + classDate) を本人が UI で確認したことで代用する。
  */
 import type { AttendanceMode } from './scraper-adapter';
+import {
+  PERIOD_START_TIMES,
+  ATTENDANCE_LEAD_MINUTES,
+  getJstParts,
+} from './attendance-schedule';
 
 export interface ConfirmSubmitGuardInput {
   // --- API 入力 ---
@@ -49,67 +54,9 @@ export type ConfirmSubmitGuardResult =
         | 'class_date_mismatch';
     };
 
-const PERIOD_START_TIMES: Record<number, { hour: number; minute: number }> = {
-  1: { hour: 9, minute: 30 },
-  2: { hour: 11, minute: 10 },
-  3: { hour: 13, minute: 10 },
-  4: { hour: 14, minute: 50 },
-  5: { hour: 16, minute: 30 },
-  6: { hour: 18, minute: 10 },
-};
-
-// WHY: auto-guard / resolveAttendanceTarget と同じ ±2 分の許容幅
-const ATTENDANCE_LEAD_MINUTES = 5;
+// WHY: 授業開始 5 分前 ±2 分。lead/開始時刻/JST 正規化は attendance-schedule に集約し、
+// scheduler 等との重複定義によるドリフトを防ぐ。
 const ATTENDANCE_WINDOW_TOLERANCE_MINUTES = 2;
-
-// WHY: 千葉工大の授業時刻は JST 固定。Worker / Web のコンテナ TZ
-// (Dockerfile/compose で TZ 未指定なら UTC) に依存して `now.getHours()` を使うと、
-// 1 限 09:25 JST 送信が UTC 00:25 として `outside_time_window` で reject される。
-// Intl.DateTimeFormat で Asia/Tokyo に正規化してから時/分/曜日を取り出す。
-const JST_PARTS_FORMATTER = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'Asia/Tokyo',
-  hour12: false,
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  weekday: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-});
-
-const DAY_OF_WEEK_MAP: Record<string, number> = {
-  Sun: 0,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
-};
-
-function getJstParts(date: Date): {
-  year: number;
-  month: number;
-  day: number;
-  hour: number;
-  minute: number;
-  dayOfWeek: number;
-} {
-  const parts = JST_PARTS_FORMATTER.formatToParts(date);
-  const pick = (type: string) =>
-    parts.find((p) => p.type === type)?.value ?? '';
-  // WHY: Intl は en-US で hour: '2-digit' / hour12: false にすると "24" を
-  // 真夜中で返す実装がある (Chrome/Node の挙動)。% 24 で 0 に正規化する。
-  const rawHour = parseInt(pick('hour'), 10);
-  return {
-    year: parseInt(pick('year'), 10),
-    month: parseInt(pick('month'), 10),
-    day: parseInt(pick('day'), 10),
-    hour: rawHour % 24,
-    minute: parseInt(pick('minute'), 10),
-    dayOfWeek: DAY_OF_WEEK_MAP[pick('weekday')] ?? 0,
-  };
-}
 
 function isInAttendanceWindow(
   now: Date,

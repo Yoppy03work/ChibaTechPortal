@@ -146,6 +146,13 @@ export {
 } from './lib/attendance-confirm-guard';
 
 export {
+  PERIOD_START_TIMES,
+  ATTENDANCE_LEAD_MINUTES,
+  getJstParts,
+  type JstParts,
+} from './lib/attendance-schedule';
+
+export {
   type ConfirmSubmitInput,
   confirmSubmitInputSchema,
 } from './lib/attendance-confirm-input';

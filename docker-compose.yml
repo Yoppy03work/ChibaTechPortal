@@ -90,6 +90,8 @@ services:
       - NODE_ENV=development
       # WHY: スクレイピングは既定オフ。自分用に取り込む場合のみ true を渡す。
       - SCRAPE_ENABLED=${SCRAPE_ENABLED:-false}
+      # WHY: confirm 出席リマインダ push。既定オフ。
+      - CONFIRM_REMINDER_ENABLED=${CONFIRM_REMINDER_ENABLED:-false}
     env_file:
       # WHY: .env は tracked されておらず初回 checkout 直後は存在しない。
       # `docker compose up postgres redis` だけ実行する経路 (test DB セットアップ)
