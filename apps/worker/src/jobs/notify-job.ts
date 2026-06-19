@@ -17,6 +17,10 @@ export const notifyQueue = new Queue(NOTIFY_QUEUE_NAME, {
   connection: bullmqConnection,
 });
 
+// WHY: メール内リンクのベース URL。本番は env で設定する。
+// example.com ハードコードを排除し、自己ホスト/本番でも正しいリンクになるようにする。
+const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:3000';
+
 interface NotifyJobData {
   userId: string;
   notifications: Array<{
@@ -89,7 +93,7 @@ export function startNotifyWorker() {
               publishedAt: new Date().toLocaleString('ja-JP'),
               body: '', // 概要はスクレイピング時に取得
               originalUrl: '',
-              portalUrl: `https://chibatech-portal.example.com/notifications`,
+              portalUrl: `${APP_BASE_URL}/notifications`,
             });
             await sendEmail({
               to: user.email,
