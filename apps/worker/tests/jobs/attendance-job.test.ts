@@ -42,6 +42,7 @@ const attendanceLogFindFirst = vi.fn();
 const attendanceLogUpdateMany = vi.fn();
 const attendanceLogCreate = vi.fn();
 const attendanceAuditLogCreate = vi.fn();
+const attendanceQrSessionFindUnique = vi.fn();
 vi.mock('@chibatech/db', () => ({
   prisma: {
     timetable: {
@@ -54,6 +55,9 @@ vi.mock('@chibatech/db', () => ({
     },
     attendanceAuditLog: {
       create: (...args: unknown[]) => attendanceAuditLogCreate(...args),
+    },
+    attendanceQrSession: {
+      findUnique: (...args: unknown[]) => attendanceQrSessionFindUnique(...args),
     },
   },
 }));
@@ -144,12 +148,17 @@ beforeEach(() => {
   vi.clearAllMocks();
   // WHY: 各テストで env を明示的にセット。デフォルトは「未設定」(= disabled) に戻す
   delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
+  delete process.env.ATTENDANCE_AUTO_ALLOWLIST;
+  delete process.env.ATTENDANCE_AUTO_ALLOWLIST_ALL;
+  delete process.env.ATTENDANCE_AUTO_DRY_RUN;
   // 並列 race パスを通さないために updateMany は count=0 / create は OK で固定
   attendanceLogUpdateMany.mockResolvedValue({ count: 0 });
   attendanceLogCreate.mockResolvedValue({});
   attendanceLogFindFirst.mockResolvedValue(null);
   // append-only 監査ログの create は best-effort。デフォルト success
   attendanceAuditLogCreate.mockResolvedValue({});
+  // デフォルトは QR セッション無し (= qrSessionValid false)
+  attendanceQrSessionFindUnique.mockResolvedValue(null);
 });
 
 afterAll(() => {
@@ -159,6 +168,9 @@ afterAll(() => {
   } else {
     process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = ORIGINAL_ENV;
   }
+  delete process.env.ATTENDANCE_AUTO_ALLOWLIST;
+  delete process.env.ATTENDANCE_AUTO_ALLOWLIST_ALL;
+  delete process.env.ATTENDANCE_AUTO_DRY_RUN;
 });
 
 // ============================================================
@@ -176,9 +188,9 @@ describe('processAttendanceJob — 外部システム実アクセス禁止', () 
     expect(adapter.attend).not.toHaveBeenCalled();
   });
 
-  it('env キルスイッチが "true" でも qrSessionValid=false 固定で adapter は呼ばれない', async () => {
-    // WHY: 4 重ロックの最終層。env を有効化しても、QR セッション検証 DB が
-    // 入るまで qrSessionValid=false 固定なので、healthCheck も attend も呼ばれない
+  it('env キルスイッチ "true" でも allowlist 未設定 (fail-closed) なら adapter は呼ばれない', async () => {
+    // WHY: env を有効化しても allowlist が空なら誰も解禁されない (fail-closed)。
+    // healthCheck も attend も呼ばれない。
     process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
     timetableFindUnique.mockResolvedValue(timetableRow());
     const adapter = makeAdapter();
@@ -391,5 +403,103 @@ describe('processAttendanceJob — 監査ログ', () => {
     // "is not a function" として検出される。
     expect(typeof (attendanceAuditLogCreate as { mockResolvedValue?: unknown }))
       .toBe('function');
+  });
+});
+
+// ============================================================
+// auto 解禁 (M2-D): enabled + allowlisted + 有効 QR セッション
+// ============================================================
+const IN_WINDOW = new Date('2026-05-04T09:25:00+09:00'); // 月曜 1限 -5分
+
+describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
+  function enableAuto() {
+    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
+    process.env.ATTENDANCE_AUTO_ALLOWLIST = 'user-1';
+  }
+  function validSession() {
+    return {
+      id: 'qs-1',
+      userId: 'user-1',
+      roomId: '8109',
+      timetableId: 'tt-1',
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(IN_WINDOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('enabled + allowlisted + 有効セッション + healthy なら attend が呼ばれる', async () => {
+    enableAuto();
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    attendanceQrSessionFindUnique.mockResolvedValue(validSession());
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'a1', data: validJobData() }, adapter);
+
+    expect(adapter.healthCheck).toHaveBeenCalled();
+    expect(adapter.attend).toHaveBeenCalledTimes(1);
+  });
+
+  it('QR セッション無しなら qrSessionValid=false で adapter は呼ばれない', async () => {
+    enableAuto();
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    attendanceQrSessionFindUnique.mockResolvedValue(null);
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'a2', data: validJobData() }, adapter);
+
+    expect(adapter.attend).not.toHaveBeenCalled();
+  });
+
+  it('allowlist 外なら adapter は呼ばれない', async () => {
+    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
+    process.env.ATTENDANCE_AUTO_ALLOWLIST = 'someone-else';
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    attendanceQrSessionFindUnique.mockResolvedValue(validSession());
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'a3', data: validJobData() }, adapter);
+
+    expect(adapter.attend).not.toHaveBeenCalled();
+  });
+
+  it('期限切れセッションなら adapter は呼ばれない', async () => {
+    enableAuto();
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    attendanceQrSessionFindUnique.mockResolvedValue({
+      ...validSession(),
+      expiresAt: new Date(Date.now() - 60 * 1000),
+    });
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'a4', data: validJobData() }, adapter);
+
+    expect(adapter.attend).not.toHaveBeenCalled();
+  });
+
+  it('dry-run: healthCheck は呼ぶが attend は呼ばず skipped(dry_run) を残す', async () => {
+    enableAuto();
+    process.env.ATTENDANCE_AUTO_DRY_RUN = 'true';
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    attendanceQrSessionFindUnique.mockResolvedValue(validSession());
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'a5', data: validJobData() }, adapter);
+
+    expect(adapter.healthCheck).toHaveBeenCalled();
+    expect(adapter.attend).not.toHaveBeenCalled();
+    const dryLog = attendanceLogCreate.mock.calls.find(
+      (c) => (c[0] as { data: { status: string } }).data.status === 'skipped'
+    );
+    expect(dryLog).toBeDefined();
+    expect((dryLog?.[0] as { data: { errorDetail: string } }).data.errorDetail).toBe(
+      'dry_run'
+    );
   });
 });

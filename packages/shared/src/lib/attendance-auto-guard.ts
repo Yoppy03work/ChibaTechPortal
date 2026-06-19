@@ -13,6 +13,11 @@
  * とする。Worker は 1 を通過した時だけ healthCheck を呼んで 2 を評価する。
  */
 import type { AttendanceMode } from './scraper-adapter';
+import {
+  PERIOD_START_TIMES,
+  ATTENDANCE_LEAD_MINUTES,
+  getJstParts,
+} from './attendance-schedule';
 
 /** Pre-network guard は campusReachable を要求しない (healthCheck 前に判定するため) */
 export interface AttendanceAutoGuardPreNetworkInput {
@@ -38,17 +43,6 @@ export type AttendanceAutoGuardResult =
   | { allowed: true }
   | { allowed: false; reason: string };
 
-const PERIOD_START_TIMES: Record<number, { hour: number; minute: number }> = {
-  1: { hour: 9, minute: 30 },
-  2: { hour: 11, minute: 10 },
-  3: { hour: 13, minute: 10 },
-  4: { hour: 14, minute: 50 },
-  5: { hour: 16, minute: 30 },
-  6: { hour: 18, minute: 10 },
-};
-
-const ATTENDANCE_LEAD_MINUTES = 5;
-
 // WHY: Scheduler のキック時刻と Worker の処理時刻には数秒〜数十秒のラグがあり、
 // BullMQ のリトライや遅延配送でさらにズレることがある。完全一致 (==) で判定すると
 // 1 分でも遅れた瞬間に reject されてしまうため、短い許容幅を持たせる。
@@ -60,10 +54,14 @@ function isExpectedAttendanceWindow(input: AttendanceAutoGuardPreNetworkInput): 
   const start = PERIOD_START_TIMES[input.period];
   if (!start) return false;
 
-  const currentMinutes = input.now.getHours() * 60 + input.now.getMinutes();
+  // WHY: 授業時刻は JST 固定。コンテナ TZ (UTC 等) に依存しないよう getJstParts で
+  // JST の 時/分/曜日 を取り出す (confirm-guard と同じ規約)。local getHours/getDay だと
+  // UTC コンテナで window がズレ、auto が全 reject される。
+  const jst = getJstParts(input.now);
+  const currentMinutes = jst.hour * 60 + jst.minute;
   const targetMinutes = start.hour * 60 + start.minute - ATTENDANCE_LEAD_MINUTES;
   return (
-    input.now.getDay() === input.dayOfWeek &&
+    jst.dayOfWeek === input.dayOfWeek &&
     Math.abs(currentMinutes - targetMinutes) <= ATTENDANCE_WINDOW_TOLERANCE_MINUTES
   );
 }

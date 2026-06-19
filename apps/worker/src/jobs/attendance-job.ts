@@ -15,6 +15,11 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { bullmqConnection } from '../lib/redis';
 import { prisma } from '@chibatech/db';
+import {
+  isAutoExecutionEnabled,
+  isUserAllowlisted,
+  isAutoDryRun,
+} from '../lib/attendance-rollout';
 import { createAttendanceAdapter } from '../scrapers/adapter-factory';
 import {
   getMasterKey,
@@ -215,6 +220,27 @@ export async function processAttendanceJob(
     return;
   }
 
+  // 7.5 auto dry-run: 全 guard (healthCheck 含む) を通過した auto を、実送信せず検証する。
+  // WHY: dry-run は CIT_Wi-Fi 到達性まで本物で確認しつつ adapter.attend() を呼ばない。
+  // pre_attempt 監査も書かない (claim の「送信を試みた」判定を汚染しないため)。claim も
+  // せず、AttendanceLog は skipped(dry_run) で残す。confirm は dry-run 対象外 (常に実送信)。
+  if (method === 'auto' && isAutoDryRun()) {
+    await recordAuditBestEffort({
+      userId,
+      phase: 'skipped',
+      timetableId,
+      classDate,
+      method,
+      reason: 'dry_run',
+      jobId: jobIdString(job.id),
+      metadata: { dryRun: true },
+    });
+    await saveLog(userId, timetableId, 'skipped', method, 'dry_run', classDate);
+    await notifyUser(userId, displayClassName, false, 'dry-run: 実送信は行いません');
+    console.log(`[attendance] auto dry-run (no real submit) job id=${job.id}`);
+    return;
+  }
+
   // 8. 二重送信防止: 実送信の前に pending 行を unique 制約で確保する (claim)
   // WHY: attend() 成功後 saveLog 前にクラッシュ → removeOnFail で jobId 解放 → 再試行で
   // 二重送信、を防ぐ。pending 行 (success/failed と同一 unique キー) を先に立て、再入時に
@@ -353,6 +379,7 @@ interface MethodGuardInput {
   classDateYmd: string;
   now: Date;
   timetable: {
+    id: string;
     userId: string;
     dayOfWeek: number;
     period: number;
@@ -387,11 +414,32 @@ async function evaluateMethodGuard(
 async function evaluateAutoMethodGuard(
   input: MethodGuardInput
 ): Promise<GuardRejection | null> {
+  // QR セッションの有効性で qrSessionValid を算出する。
+  // WHY: classDate は @db.Date。qr-validate が new Date('YYYY-MM-DD')(UTC midnight) で
+  // 保存するのと同じく、JST 日 (classDateYmd) から UTC midnight を作ってキーを一致させる
+  // (host TZ 非依存)。期限内 + roomId 一致 + 本人 (timetable 紐付けがあれば一致) を要求。
+  const sessionClassDate = new Date(input.classDateYmd);
+  const session = await prisma.attendanceQrSession.findUnique({
+    where: {
+      userId_roomId_classDate: {
+        userId: input.userId,
+        roomId: input.roomId,
+        classDate: sessionClassDate,
+      },
+    },
+  });
+  const qrSessionValid =
+    !!session &&
+    session.expiresAt > input.now &&
+    session.roomId === input.timetable.room &&
+    (session.timetableId == null || session.timetableId === input.timetable.id);
+
   // pre-network: DB / 内部状態だけで判定。reject 時は adapter に触れない
   const guardInput: AttendanceAutoGuardPreNetworkInput = {
-    // WHY: server 側の明示的キルスイッチ。QR セッション検証 DB が入るまで
-    // true にしても qrSessionValid=false により自動送信は解禁されない。
-    autoExecutionEnabled: process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED === 'true',
+    // WHY: マスターキルスイッチ + allowlist (fail-closed)。どちらか不可なら auto は走らない。
+    // Scheduler でも同条件で gate するが、Worker が最終ゲートとして再評価する。
+    autoExecutionEnabled:
+      isAutoExecutionEnabled() && isUserAllowlisted(input.userId),
     method: input.method,
     storedMode: normalizeAttendanceSettings(input.timetable.user.attendanceSettings).mode,
     timetableUserId: input.timetable.userId,
@@ -402,7 +450,7 @@ async function evaluateAutoMethodGuard(
     period: input.timetable.period,
     now: input.now,
     alreadySubmitted: !!input.existingSuccess,
-    qrSessionValid: false,
+    qrSessionValid,
   };
 
   const pre = evaluateAttendanceAutoGuardPreNetwork(guardInput);
