@@ -88,6 +88,8 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/chibatech_portal
       - REDIS_URL=redis://redis:6379
       - NODE_ENV=development
+      # WHY: スクレイピングは既定オフ。自分用に取り込む場合のみ true を渡す。
+      - SCRAPE_ENABLED=${SCRAPE_ENABLED:-false}
     env_file:
       # WHY: .env は tracked されておらず初回 checkout 直後は存在しない。
       # `docker compose up postgres redis` だけ実行する経路 (test DB セットアップ)
