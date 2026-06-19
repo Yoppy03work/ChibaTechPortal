@@ -6,25 +6,24 @@
  * 稼働時間は7:00〜22:00（設計書に基づく）。
  */
 import { prisma } from '@chibatech/db';
-import { normalizeAttendanceSettings } from '@chibatech/shared';
+import {
+  normalizeAttendanceSettings,
+  PERIOD_START_TIMES,
+  ATTENDANCE_LEAD_MINUTES,
+  getJstParts,
+} from '@chibatech/shared';
 import { scrapeQueue } from './scrape-job';
 import { attendanceQueue } from './attendance-job';
+import { notifyQueue } from './notify-job';
 
 const SCRAPE_INTERVAL_MS = 15 * 60 * 1000; // 15分
 const ATTENDANCE_CHECK_INTERVAL_MS = 60 * 1000; // 1分（授業時間チェック）
 const JITTER_MAX_MS = 3 * 60 * 1000; // ±3分
 const ACTIVE_HOURS = { start: 7, end: 22 };
-const ATTENDANCE_LEAD_MINUTES = 5; // 授業開始5分前に出席
-
-/** 授業時限の開始時刻（時:分） */
-const PERIOD_START_TIMES: Record<number, { hour: number; minute: number }> = {
-  1: { hour: 9, minute: 30 },
-  2: { hour: 11, minute: 10 },
-  3: { hour: 13, minute: 10 },
-  4: { hour: 14, minute: 50 },
-  5: { hour: 16, minute: 30 },
-  6: { hour: 18, minute: 10 },
-};
+// WHY: confirm モードは授業開始の何分前にリマインダ push を送るか。
+// ユーザが UI を開いて出席ウィンドウ (開始 5 分前 ±2 分) に間に合うよう、
+// attend lead (5 分) より大きめにする。
+const REMINDER_LEAD_MINUTES = 10;
 
 function isActiveHour(): boolean {
   const hour = new Date().getHours();
@@ -142,6 +141,67 @@ async function enqueueAttendanceJobs() {
   }
 }
 
+/**
+ * confirm モードのリマインダ push を投入する（授業開始 REMINDER_LEAD_MINUTES 分前）。
+ *
+ * WHY: confirm は「ユーザが UI を開いて確認 → 送信」する手動操作で、出席ウィンドウ
+ * (開始 5 分前 ±2 分) は狭い。その手前で push して「アプリを開いて出席確認」を促す。
+ * CONFIRM_REMINDER_ENABLED=true のときのみ動作する（既定オフ）。時刻判定は JST
+ * (getJstParts) で行いコンテナ TZ に依存しない。
+ */
+export async function enqueueConfirmReminders() {
+  if (process.env.CONFIRM_REMINDER_ENABLED !== 'true') return;
+
+  const jst = getJstParts(new Date());
+  const currentMinutes = jst.hour * 60 + jst.minute;
+  const ymd = `${jst.year}-${String(jst.month).padStart(2, '0')}-${String(
+    jst.day
+  ).padStart(2, '0')}`;
+
+  for (const [periodStr, startTime] of Object.entries(PERIOD_START_TIMES)) {
+    const period = parseInt(periodStr, 10);
+    const reminderMinutes =
+      startTime.hour * 60 + startTime.minute - REMINDER_LEAD_MINUTES;
+    if (currentMinutes !== reminderMinutes) continue;
+
+    const timetables = await prisma.timetable.findMany({
+      where: { dayOfWeek: jst.dayOfWeek, period, room: { not: null } },
+      select: {
+        id: true,
+        userId: true,
+        className: true,
+        user: { select: { attendanceSettings: true } },
+      },
+    });
+
+    for (const tt of timetables) {
+      const { mode } = normalizeAttendanceSettings(tt.user.attendanceSettings);
+      if (mode !== 'confirm') continue;
+
+      // WHY: 1 分 tick の重複や worker 再起動での二重送信を防ぐため、jobId を
+      // user+timetable+日付で一意化する。source:'attendance' は notify 側で source
+      // フィルタ対象外として扱われ、quiet hours は notify 側で考慮される。
+      await notifyQueue.add(
+        'notify',
+        {
+          userId: tt.userId,
+          notifications: [
+            {
+              title: `${tt.className} の出席確認: アプリを開いて出席を送信してください`,
+              source: 'attendance',
+            },
+          ],
+        },
+        {
+          jobId: `reminder-${tt.userId}-${tt.id}-${ymd}`,
+          removeOnComplete: 100,
+          removeOnFail: true,
+        }
+      );
+    }
+  }
+}
+
 export function startScheduler() {
   // WHY: スクレイピングは SCRAPE_ENABLED=true のときだけ起動する。既定では起動時の
   // 即実行も 15 分間隔も行わない（外部アクセスしない dark default）。テスト/ドライランで
@@ -162,10 +222,13 @@ export function startScheduler() {
     console.log('[scheduler] scrape disabled (SCRAPE_ENABLED!=true)');
   }
 
-  // 出席: 1分間隔で授業時間チェック
+  // 出席: 1分間隔で授業時間チェック + confirm リマインダ
   const attendanceInterval = setInterval(() => {
     enqueueAttendanceJobs().catch((err) => {
       console.error('[scheduler] Attendance enqueue failed:', err.message);
+    });
+    enqueueConfirmReminders().catch((err) => {
+      console.error('[scheduler] Confirm reminder enqueue failed:', err.message);
     });
   }, ATTENDANCE_CHECK_INTERVAL_MS);
 
