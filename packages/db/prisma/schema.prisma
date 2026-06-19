@@ -122,8 +122,10 @@ model AttendanceLog {
   userId      String   @map("user_id")
   timetableId String   @map("timetable_id")
   classDate   DateTime @map("class_date") @db.Date
-  status      String // 'success' | 'failed' | 'manual' | 'skipped'
-  method      String // 'auto' | 'manual' | 'qr-learn'
+  // WHY: 'pending' は実送信(adapter.attend)の前に unique 制約で確保する claim 行。
+  // attend 成功後 saveLog 前のクラッシュでも pending が残り、再試行時に二重送信を防ぐ。
+  status      String // 'success' | 'failed' | 'manual' | 'skipped' | 'pending'
+  method      String // 'auto' | 'manual' | 'confirm' | 'qr-learn'
   attemptedAt DateTime @default(now()) @map("attempted_at")
   errorDetail String?  @map("error_detail") @db.Text
 
