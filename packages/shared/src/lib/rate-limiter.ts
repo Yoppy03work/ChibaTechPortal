@@ -97,4 +97,7 @@ export const RATE_LIMITS = {
   // WHY: 1 ユーザは通常 1 授業あたり 1 回 (15 分の time window 内)。10/10min は
   // 想定上限の 10 倍程度の余裕。spam による Worker キュー圧迫を防ぐ。
   attendanceSubmit: { maxRequests: 10, windowSeconds: 10 * 60 } satisfies RateLimitConfig,
+
+  /** QR セッション検証: 10分に10回（再スキャン許容しつつ連打を抑止） */
+  attendanceQrValidate: { maxRequests: 10, windowSeconds: 10 * 60 } satisfies RateLimitConfig,
 } as const;
