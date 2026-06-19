@@ -34,7 +34,13 @@ export function isUserAllowlisted(userId: string): boolean {
 /**
  * dry-run か。true のとき全 guard を通すが adapter.attend() は実行せず
  * （no-op + 監査ログ）、外部送信なしで経路全体を検証する。
+ *
+ * WHY (fail-toward-dry-run): このフラグは「実送信させない」ための安全弁なので、
+ * 安全側＝送らない方向に倒す。dry-run 検証中に値を typo (`tru` 等) しても
+ * 実送信にならないよう、空でも 'false'/'0'/'no' でもない値は全て dry-run 扱いにする。
+ * 実送信したいときは未設定 or 明示的に false/0/no にする (= 明示 opt-out)。
  */
 export function isAutoDryRun(): boolean {
-  return process.env.ATTENDANCE_AUTO_DRY_RUN === 'true';
+  const v = (process.env.ATTENDANCE_AUTO_DRY_RUN ?? '').trim().toLowerCase();
+  return v !== '' && v !== 'false' && v !== '0' && v !== 'no';
 }

@@ -502,4 +502,18 @@ describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
       'dry_run'
     );
   });
+
+  it('セッションが別の timetableId に紐付いていれば adapter は呼ばれない', async () => {
+    enableAuto();
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    attendanceQrSessionFindUnique.mockResolvedValue({
+      ...validSession(),
+      timetableId: 'other-tt',
+    });
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'a6', data: validJobData() }, adapter);
+
+    expect(adapter.attend).not.toHaveBeenCalled();
+  });
 });
