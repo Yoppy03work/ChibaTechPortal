@@ -58,10 +58,17 @@ export async function sendPushToUser(userId: string, payload: PushPayload): Prom
           { TTL: 60 * 60 } // 1時間有効
         );
       } catch (error) {
-        // WHY: 410 Gone = サブスクリプション失効 → DBから削除
-        if (error instanceof webPush.WebPushError && error.statusCode === 410) {
+        // WHY: 410 Gone / 404 Not Found = サブスクリプション失効 → DB から削除して終了。
+        // handled なので re-throw せず、失敗カウントにも含めない (dead subscription の掃除)。
+        if (
+          error instanceof webPush.WebPushError &&
+          (error.statusCode === 410 || error.statusCode === 404)
+        ) {
           await prisma.pushSubscription.delete({ where: { id: sub.id } });
-          console.log(`[push] Removed expired subscription ${sub.id}`);
+          console.log(
+            `[push] Removed gone subscription ${sub.id} (status ${error.statusCode})`
+          );
+          return;
         }
         throw error;
       }
