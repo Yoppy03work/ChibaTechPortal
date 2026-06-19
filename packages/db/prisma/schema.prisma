@@ -63,6 +63,9 @@ model Timetable {
   classId              String? @map("class_id")
   attendanceUrlPattern String? @map("attendance_url_pattern")
   syllabusId           String? @map("syllabus_id")
+  // WHY: 'manual' | 'scraped'。時間割スクレイピング同期がユーザーの手動編集を
+  // 上書きしないための判別。既存行・手動登録は 'manual' 既定。
+  source               String  @default("manual")
 
   user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   syllabus             Syllabus?             @relation(fields: [syllabusId], references: [id])

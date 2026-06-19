@@ -31,6 +31,15 @@ export interface ScrapedAssignment {
   url: string;
 }
 
+/** 時間割の1コマ（スクレイピング結果） */
+export interface ScrapedTimetableEntry {
+  dayOfWeek: number; // 0=日, 1=月, ..., 6=土
+  period: number; // 1限〜6限
+  className: string;
+  room: string | null;
+  classId: string | null;
+}
+
 // --- 出席登録支援（3モード設計） ---
 
 /**
@@ -110,6 +119,9 @@ export interface ScraperAdapter {
 
   /** 課題一覧を取得する（manaba用、CIT Portalはnull） */
   fetchAssignments?(session: ScraperSession): Promise<ScrapedAssignment[]>;
+
+  /** 時間割を取得する（CIT Portal/UNIPA 用） */
+  fetchTimetable?(session: ScraperSession): Promise<ScrapedTimetableEntry[]>;
 
   /** 外部システムが稼働しているか確認する */
   healthCheck(): Promise<boolean>;
