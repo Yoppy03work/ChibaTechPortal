@@ -8,6 +8,7 @@ import type { ScraperAdapter, AttendanceAdapter } from '@chibatech/shared';
 import { CitPortalHttpAdapter } from './adapters/cit-portal-http';
 import { ManabaHttpAdapter } from './adapters/manaba-http';
 import { AttendanceHttpAdapter } from './adapters/attendance-http';
+import { MockAttendanceAdapter } from './adapters/attendance-mock';
 
 type ScraperTarget = 'cit-portal' | 'manaba';
 
@@ -29,7 +30,16 @@ export function createAdapter(target: ScraperTarget): ScraperAdapter {
 
 /**
  * 出席アダプタを生成する
+ *
+ * WHY: ローカル / dev で CIT_Wi-Fi なしに全経路を検証するため、ATTENDANCE_ADAPTER=mock
+ * のときだけモックを返す。本番混入を防ぐため production では mock 指定を拒否する。
  */
 export function createAttendanceAdapter(): AttendanceAdapter {
+  if (process.env.ATTENDANCE_ADAPTER === 'mock') {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('ATTENDANCE_ADAPTER=mock is not allowed in production');
+    }
+    return new MockAttendanceAdapter();
+  }
   return new AttendanceHttpAdapter();
 }
