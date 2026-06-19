@@ -9,7 +9,10 @@
 import type { AttendanceResult, AttendanceAdapter } from '@chibatech/shared';
 import { ScraperLoginError, ScraperError } from '@chibatech/shared';
 
-const BASE_URL = 'https://attendance.is.it-chiba.ac.jp';
+// WHY: 既定は本番 CIT 出席システム。ローカル検証で stub サーバへ向けたい場合のみ
+// ATTENDANCE_BASE_URL で上書きする（production は未設定 → 既定のまま）。
+const BASE_URL =
+  process.env.ATTENDANCE_BASE_URL ?? 'https://attendance.is.it-chiba.ac.jp';
 const LOGIN_URL = `${BASE_URL}/attendance/login`;
 const TOP_URL = `${BASE_URL}/attendance/top`;
 
