@@ -13,7 +13,10 @@ import type {
 import { ScraperLoginError, ScraperError } from '@chibatech/shared';
 import { sanitizeHtml } from '@chibatech/shared';
 
-const BASE_URL = 'https://portal.it-chiba.ac.jp/uprx';
+// WHY: 既定は CIT の UNIPA ポータル。別キャンパス/セルフホストや stub 向けに
+// CIT_PORTAL_BASE_URL で上書き可能にする (institution ハードコードの排除)。
+const BASE_URL =
+  process.env.CIT_PORTAL_BASE_URL ?? 'https://portal.it-chiba.ac.jp/uprx';
 const LOGIN_PAGE_URL = `${BASE_URL}/up/pk/pky001/Pky00101.xhtml`;
 const NOTIFICATIONS_URL = `${BASE_URL}/up/pk/pky501/Pky50101.xhtml`;
 

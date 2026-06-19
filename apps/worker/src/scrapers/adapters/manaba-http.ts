@@ -14,7 +14,9 @@ import type {
 import { ScraperLoginError, ScraperError } from '@chibatech/shared';
 import { sanitizeHtml } from '@chibatech/shared';
 
-const BASE_URL = 'https://cit.manaba.jp';
+// WHY: 既定は CIT の manaba。別テナント/セルフホストや stub 向けに
+// MANABA_BASE_URL で上書き可能にする。
+const BASE_URL = process.env.MANABA_BASE_URL ?? 'https://cit.manaba.jp';
 const HOME_URL = `${BASE_URL}/ct/home`;
 const LOGIN_URL = `${BASE_URL}/ct/login`;
 
