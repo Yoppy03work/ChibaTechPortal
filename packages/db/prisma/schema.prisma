@@ -26,9 +26,10 @@ model User {
   timetable           Timetable[]
   notifications       Notification[]
   assignments         Assignment[]
-  attendanceLogs      AttendanceLog[]
-  attendanceAuditLogs AttendanceAuditLog[]
-  refreshTokens       RefreshToken[]
+  attendanceLogs       AttendanceLog[]
+  attendanceAuditLogs  AttendanceAuditLog[]
+  refreshTokens        RefreshToken[]
+  attendanceQrSessions AttendanceQrSession[]
 
   @@map("users")
 }
@@ -63,10 +64,11 @@ model Timetable {
   attendanceUrlPattern String? @map("attendance_url_pattern")
   syllabusId           String? @map("syllabus_id")
 
-  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  syllabus            Syllabus?            @relation(fields: [syllabusId], references: [id])
-  attendanceLogs      AttendanceLog[]
-  attendanceAuditLogs AttendanceAuditLog[]
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  syllabus             Syllabus?             @relation(fields: [syllabusId], references: [id])
+  attendanceLogs       AttendanceLog[]
+  attendanceAuditLogs  AttendanceAuditLog[]
+  attendanceQrSessions AttendanceQrSession[]
 
   @@unique([userId, dayOfWeek, period])
   @@map("timetables")
@@ -224,4 +226,32 @@ model RefreshToken {
   @@index([userId])
   @@index([family])
   @@map("refresh_tokens")
+}
+
+// --- 出席 QR セッション ---
+// WHY: auto 出席解禁の前提となる「QR 由来の検証済みセッション」。ユーザが教室の QR を
+// スキャン (confirm 送信 or 専用 enroll) して在席を示すと短命セッションを作る。Worker の
+// auto guard はこのセッションが有効 (期限内 + roomId 一致 + 本人) かで qrSessionValid を
+// 判定する。RefreshToken と同じ短命トークン方式 (expiresAt / consumedAt) を踏襲。
+
+model AttendanceQrSession {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  roomId      String    @map("room_id")
+  // WHY: 解決済み timetable に紐付けると、Worker が roomId == timetable.room と所有を
+  // 1 read で検証できる。未解決のケースを許容するため nullable。
+  timetableId String?   @map("timetable_id")
+  classDate   DateTime  @map("class_date") @db.Date
+  expiresAt   DateTime  @map("expires_at")
+  // WHY: 単回利用にしたい場合の消費印 (防御多層)。初回解禁では必須ではない。
+  consumedAt  DateTime? @map("consumed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timetable Timetable? @relation(fields: [timetableId], references: [id], onDelete: SetNull)
+
+  // WHY: 1 ユーザ・1 教室・1 授業日につき 1 セッション (再スキャンは upsert で更新)
+  @@unique([userId, roomId, classDate])
+  @@index([userId, expiresAt])
+  @@map("attendance_qr_sessions")
 }
