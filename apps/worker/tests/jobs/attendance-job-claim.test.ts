@@ -153,9 +153,10 @@ describe('processAttendanceJob — claim-before-attend', () => {
     expect((skipped?.[0] as { data: { reason: string } }).data.reason).toBe('already_submitted');
   });
 
-  it('既存 failed 行は reclaim (NOT success を pending に) して attend する', async () => {
+  it('既存 failed 行 + pre_attempt 監査なし (attend 未到達の失敗) は reclaim して attend', async () => {
     attendanceLogCreate.mockRejectedValueOnce(p2002());
     attendanceLogFindUnique.mockResolvedValue({ id: 'x', status: 'failed' });
+    // attendanceAuditLogFindFirst は null (beforeEach) = attend 未到達 → reclaim 可
     const adapter = makeAdapter();
 
     await processAttendanceJob({ id: 'j3', data: confirmJobData() }, adapter);
@@ -196,5 +197,37 @@ describe('processAttendanceJob — claim-before-attend', () => {
     await processAttendanceJob({ id: 'j5', data: confirmJobData() }, adapter);
 
     expect(adapter.attend).toHaveBeenCalledTimes(1);
+  });
+
+  // WHY: レビュー指摘の確定ブロッカー回帰防止。attempt1 の POST が CIT に登録されたのに
+  // 応答が失われ 'failed' になったケースで、再送 = 二重送信を防ぐ。failed でも pre_attempt
+  // 監査があれば attend 到達済みとみなして再送しない。
+  it('既存 failed 行 + pre_attempt 監査あり (lost-response 疑い) → 再送しない', async () => {
+    attendanceLogCreate.mockRejectedValueOnce(p2002());
+    attendanceLogFindUnique.mockResolvedValue({ id: 'x', status: 'failed' });
+    attendanceAuditLogFindFirst.mockResolvedValue({ id: 'a', phase: 'pre_attempt' });
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'j6', data: confirmJobData() }, adapter);
+
+    expect(adapter.attend).not.toHaveBeenCalled();
+    const skipped = attendanceAuditLogCreate.mock.calls.find(
+      (c) => (c[0] as { data: { phase: string } }).data.phase === 'skipped'
+    );
+    expect((skipped?.[0] as { data: { reason: string } }).data.reason).toBe(
+      'possible_prior_submit'
+    );
+  });
+
+  // WHY: claim create が P2002 以外で失敗したら握り潰さず throw し、BullMQ にジョブ失敗を
+  // 伝える (監査込みで再実行される)。誤って続行して attend しないこと。
+  it('claim create が非 P2002 で失敗したら rethrow し attend しない', async () => {
+    attendanceLogCreate.mockRejectedValueOnce(new Error('db down'));
+    const adapter = makeAdapter();
+
+    await expect(
+      processAttendanceJob({ id: 'j7', data: confirmJobData() }, adapter)
+    ).rejects.toThrow('db down');
+    expect(adapter.attend).not.toHaveBeenCalled();
   });
 });

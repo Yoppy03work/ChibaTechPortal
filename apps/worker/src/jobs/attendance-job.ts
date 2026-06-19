@@ -582,8 +582,13 @@ function isUniqueViolation(err: unknown): boolean {
  *
  *   - 'won'                  : この job が claim を獲得。続行して attend してよい。
  *   - 'already_submitted'    : 既に success 行がある。再送しない。
- *   - 'possible_prior_submit': pending 行 + pre_attempt 監査ログあり = 外部送信済みの
- *                              可能性。再送しない。
+ *   - 'possible_prior_submit': 既存行 (pending/failed/skipped) + pre_attempt 監査ログあり
+ *                              = attend 到達済み = 外部送信済みの可能性。再送しない。
+ *
+ * 真実源は pre_attempt 監査ログ。これは recordAuditRequired が attend の前に必ず durable に
+ * 書く (失敗時は throw して attend に到達しない) ため、「監査あり = attend を試みた」が成立する。
+ * status だけで failed を一律 reclaim すると、POST が CIT に登録されたのに応答が失われて
+ * 'failed' になったケースで再送 = 二重送信になるため、failed も監査ログでガードする。
  */
 async function claimAttendanceSubmit(input: {
   userId: string;
@@ -610,18 +615,14 @@ async function claimAttendanceSubmit(input: {
 
   if (existing?.status === 'success') return 'already_submitted';
 
-  if (existing?.status === 'pending') {
-    // in-flight、または attend 直前/直後のクラッシュ。pre_attempt 監査ログが既にあれば
-    // 外部送信を試みた可能性 → 「絶対に二重送信しない」で再送しない。
-    const priorAttempt = await prisma.attendanceAuditLog.findFirst({
-      where: { userId, timetableId, classDate, method, phase: 'pre_attempt' },
-    });
-    if (priorAttempt) return 'possible_prior_submit';
-    // pre_attempt なし = attend 到達前のクラッシュ → reclaim して続行
-    return 'won';
-  }
+  // success 以外 (pending / failed / skipped): pre_attempt 監査ログが「attend を試みたか」の
+  // 真実源。あれば外部送信済みの可能性があるので「絶対に二重送信しない」で再送しない。
+  // 監査が無い = attend 未到達 (creds/decrypt 前のクラッシュ、guard skip など) → reclaim して続行。
+  const priorAttempt = await prisma.attendanceAuditLog.findFirst({
+    where: { userId, timetableId, classDate, method, phase: 'pre_attempt' },
+  });
+  if (priorAttempt) return 'possible_prior_submit';
 
-  // failed / skipped → 再試行: success 以外を pending に reclaim して続行
   await prisma.attendanceLog.updateMany({
     where: { ...key, NOT: { status: 'success' } },
     data: { status: 'pending', attemptedAt: new Date(), errorDetail: null },
