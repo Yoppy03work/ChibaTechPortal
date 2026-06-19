@@ -10,7 +10,7 @@ import { Worker, Queue } from 'bullmq';
 import { bullmqConnection } from '../lib/redis';
 import { prisma } from '@chibatech/db';
 import { createAdapter } from '../scrapers/adapter-factory';
-import { diffAndSave } from '../services/diff-engine';
+import { diffAndSave, diffAndSaveAssignments } from '../services/diff-engine';
 import {
   getMasterKey,
   withDecryptedCredentials,
@@ -82,6 +82,28 @@ export function startScrapeWorker() {
             }
 
             console.log(`[${target}] User ${userId}: ${notifications.length} fetched, ${newItems.length} new`);
+
+            // WHY: manaba は課題も取得して Assignment に保存する (CIT Portal は課題なし)。
+            // fetchAssignments は ScraperAdapter の optional メソッド。
+            if (target === 'manaba' && adapter.fetchAssignments) {
+              const assignments = await adapter.fetchAssignments(session);
+              const newAssignments = await diffAndSaveAssignments(userId, assignments);
+
+              if (newAssignments.length > 0) {
+                const { notifyQueue } = await import('./notify-job');
+                await notifyQueue.add('push', {
+                  userId,
+                  notifications: newAssignments.map((a) => ({
+                    title: `課題: ${a.title}`,
+                    source: target,
+                  })),
+                });
+              }
+
+              console.log(
+                `[${target}] User ${userId}: ${assignments.length} assignments fetched, ${newAssignments.length} new`
+              );
+            }
           }
         );
       } finally {
