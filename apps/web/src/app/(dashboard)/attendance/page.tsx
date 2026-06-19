@@ -7,7 +7,7 @@
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { prisma } from '@chibatech/db';
-import { normalizeAttendanceSettings } from '@chibatech/shared';
+import { normalizeAttendanceSettings, summarizeAttendance } from '@chibatech/shared';
 import { AttendanceSettings } from './attendance-settings';
 import { ConfirmFlow } from './confirm-flow';
 
@@ -37,9 +37,9 @@ export default async function AttendancePage() {
         })
       : [];
 
-  // 直近7日の出席ログ
+  // 直近30日の出席ログ（統計 + 履歴）
   const since = new Date();
-  since.setDate(since.getDate() - 7);
+  since.setDate(since.getDate() - 30);
 
   const logs = await prisma.attendanceLog.findMany({
     where: {
@@ -52,6 +52,14 @@ export default async function AttendancePage() {
     orderBy: { classDate: 'desc' },
   });
 
+  const summary = summarizeAttendance(
+    logs.map((l) => ({
+      status: l.status,
+      method: l.method,
+      className: l.timetable.className,
+    }))
+  );
+
   return (
     <main className="mx-auto max-w-2xl space-y-6 p-4">
       <h1 className="text-lg font-bold text-[#1E3A5F]">出席管理</h1>
@@ -62,9 +70,54 @@ export default async function AttendancePage() {
       {/* confirm モードのときだけ確認フローを表示 */}
       {settings.mode === 'confirm' && <ConfirmFlow timetables={timetables} />}
 
+      {/* 出席統計 */}
+      <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold text-gray-500">出席統計（直近30日）</h2>
+        {summary.total === 0 ? (
+          <p className="text-sm text-gray-400">記録はありません</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-[#1E3A5F]">
+                {Math.round(summary.successRate * 100)}%
+              </span>
+              <span className="text-xs text-gray-400">
+                成功率（{summary.success}/{summary.success + summary.failed}）
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+              <span>出席 {summary.success}</span>
+              <span>失敗 {summary.failed}</span>
+              <span>スキップ {summary.skipped}</span>
+              <span className="text-gray-300">|</span>
+              <span>自動 {summary.byMethod.auto}</span>
+              <span>確認 {summary.byMethod.confirm}</span>
+              <span>手動 {summary.byMethod.manual}</span>
+            </div>
+            {summary.byClass.length > 0 && (
+              <ul className="space-y-1">
+                {summary.byClass.map((c) => (
+                  <li
+                    key={c.className}
+                    className="flex items-center justify-between text-xs"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-gray-600">
+                      {c.className}
+                    </span>
+                    <span className="text-gray-400">
+                      {c.success}/{c.total}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
+
       {/* 出席ログ */}
       <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold text-gray-500">出席ログ（直近7日）</h2>
+        <h2 className="mb-3 text-sm font-semibold text-gray-500">出席ログ（直近30日）</h2>
 
         {logs.length === 0 ? (
           <p className="text-sm text-gray-400">出席記録はありません</p>

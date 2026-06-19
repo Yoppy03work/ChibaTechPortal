@@ -153,6 +153,12 @@ export {
 } from './lib/attendance-schedule';
 
 export {
+  summarizeAttendance,
+  type AttendanceSummary,
+  type AttendanceLogSummaryItem,
+} from './lib/attendance-summary';
+
+export {
   type ConfirmSubmitInput,
   confirmSubmitInputSchema,
 } from './lib/attendance-confirm-input';
