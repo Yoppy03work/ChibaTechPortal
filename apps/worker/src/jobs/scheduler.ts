@@ -38,7 +38,11 @@ function randomJitter(): number {
 /**
  * 全ユーザーに対してスクレイピングジョブを投入する
  */
-async function enqueueScrapeJobs() {
+export async function enqueueScrapeJobs() {
+  // WHY: スクレイピングは SCRAPE_ENABLED=true のときのみ実行する。既定（未設定/false）は
+  // 外部アクセスしない。startScheduler でも gate するが、stray な呼び出しを防ぐ
+  // 多層防御としてここでも弾く（ATTENDANCE_AUTO_EXECUTION_ENABLED と同じ思想）。
+  if (process.env.SCRAPE_ENABLED !== 'true') return;
   if (!isActiveHour()) return;
 
   // WHY: キューにはuserIdと対象種別のみ載せる。認証情報はworker側でDB取得・復号する
@@ -139,15 +143,24 @@ async function enqueueAttendanceJobs() {
 }
 
 export function startScheduler() {
-  // スクレイピング: 起動時に即実行 + 15分間隔
-  enqueueScrapeJobs().catch((err) => {
-    console.error('[scheduler] Initial scrape enqueue failed:', err.message);
-  });
-  const scrapeInterval = setInterval(() => {
+  // WHY: スクレイピングは SCRAPE_ENABLED=true のときだけ起動する。既定では起動時の
+  // 即実行も 15 分間隔も行わない（外部アクセスしない dark default）。テスト/ドライランで
+  // 意図しない CIT Portal / manaba アクセスを防ぐ。
+  const scrapeEnabled = process.env.SCRAPE_ENABLED === 'true';
+  let scrapeInterval: ReturnType<typeof setInterval> | undefined;
+  if (scrapeEnabled) {
+    // スクレイピング: 起動時に即実行 + 15分間隔
     enqueueScrapeJobs().catch((err) => {
-      console.error('[scheduler] Scrape enqueue failed:', err.message);
+      console.error('[scheduler] Initial scrape enqueue failed:', err.message);
     });
-  }, SCRAPE_INTERVAL_MS);
+    scrapeInterval = setInterval(() => {
+      enqueueScrapeJobs().catch((err) => {
+        console.error('[scheduler] Scrape enqueue failed:', err.message);
+      });
+    }, SCRAPE_INTERVAL_MS);
+  } else {
+    console.log('[scheduler] scrape disabled (SCRAPE_ENABLED!=true)');
+  }
 
   // 出席: 1分間隔で授業時間チェック
   const attendanceInterval = setInterval(() => {

@@ -17,7 +17,9 @@ const attendanceWorker = startAttendanceWorker();
 const scheduler = startScheduler();
 
 console.log('Workers started: scrape, notify, attendance');
-console.log('Scheduler started: scrape 15min, attendance 1min check, active 7:00-22:00');
+console.log(
+  'Scheduler started: attendance 1min check, active 7:00-22:00 (scrape gated by SCRAPE_ENABLED)'
+);
 
 // Graceful shutdown
 async function shutdown() {
