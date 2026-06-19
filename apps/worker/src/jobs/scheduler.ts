@@ -20,7 +20,16 @@ import { isAutoExecutionEnabled, isUserAllowlisted } from '../lib/attendance-rol
 const SCRAPE_INTERVAL_MS = 15 * 60 * 1000; // 15分
 const ATTENDANCE_CHECK_INTERVAL_MS = 60 * 1000; // 1分（授業時間チェック）
 const JITTER_MAX_MS = 3 * 60 * 1000; // ±3分
-const ACTIVE_HOURS = { start: 7, end: 22 };
+
+// WHY: 稼働時間帯は既定 7:00-22:00。env で上書き可能 (不正値は既定にフォールバック)。
+function envHour(name: string, fallback: number): number {
+  const v = Number(process.env[name]);
+  return Number.isInteger(v) && v >= 0 && v <= 24 ? v : fallback;
+}
+const ACTIVE_HOURS = {
+  start: envHour('ATTENDANCE_ACTIVE_HOURS_START', 7),
+  end: envHour('ATTENDANCE_ACTIVE_HOURS_END', 22),
+};
 // WHY: confirm モードは授業開始の何分前にリマインダ push を送るか。
 // ユーザが UI を開いて出席ウィンドウ (開始 5 分前 ±2 分) に間に合うよう、
 // attend lead (5 分) より大きめにする。
