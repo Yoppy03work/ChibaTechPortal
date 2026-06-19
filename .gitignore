@@ -4,6 +4,9 @@ dist/
 .turbo/
 *.tsbuildinfo
 
+# Scratch / working files (task tickets, runbooks, review artifacts)
+.tmp/
+
 # Environment variables (security: never commit secrets)
 .env
 .env.local
