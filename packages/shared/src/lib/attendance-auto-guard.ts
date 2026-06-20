@@ -18,6 +18,7 @@ import {
   ATTENDANCE_LEAD_MINUTES,
   getJstParts,
 } from './attendance-schedule';
+import { attendanceRoomMatches } from './room-normalize';
 
 /** Pre-network guard は campusReachable を要求しない (healthCheck 前に判定するため) */
 export interface AttendanceAutoGuardPreNetworkInput {
@@ -93,7 +94,9 @@ export function evaluateAttendanceAutoGuardPreNetwork(
     return { allowed: false, reason: 'job user does not own timetable entry' };
   }
 
-  if (!input.timetableRoom || input.timetableRoom !== input.jobRoomId) {
+  // WHY: 時間割 (UNIPA) と QR roomId (出席システム) の表記系差を CIT 規則で吸収して突合。
+  // null/空 timetableRoom は matcher 側で不一致 (false)。
+  if (!attendanceRoomMatches(input.timetableRoom, input.jobRoomId)) {
     return { allowed: false, reason: 'job room does not match timetable room' };
   }
 

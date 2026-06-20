@@ -183,3 +183,59 @@ export function roomsMatch(
   // 両方コア無し (日本語のみ等) → canonical 完全一致のみ許容
   return na.canonical === nb.canonical;
 }
+
+/**
+ * CIT 出席システム固有の教室コード対応規則を加味して、
+ * 時間割 (UNIPA) の room と QR (出席システム) の roomId が同一教室かを判定する。
+ *
+ * WHY: 両者は表記体系が異なる。
+ *   - UNIPA 時間割: 3 桁の教室コード + 種別 ("７３１講義室" → コア "731")
+ *   - 出席システム QR: /attendance/class_room/{roomId} の roomId ("7301")
+ * CIT のローカル規則: 「3 桁の教室のうち 7 始まりの教室のみ、2 桁目と 3 桁目の間に
+ * 0 が挿入される」。例) UNIPA "731" ⇔ QR "7301"。7 始まり以外 (例 "431") は変換なしで
+ * 同一。この規則を逆適用して両者を UNIPA 正規形へ畳んでから比較するため、時間割側を
+ * UNIPA 表記 ("731講義室") で持っても QR 表記 ("7301") で手入力しても一致する。
+ *
+ * 保守性: 4 桁・7 始まり・3 文字目が '0' の厳密パターンのときだけ 0 を取り除く。
+ * それ以外は素通しなので、別教室を誤って同一視しない (例 "7310"/"7031" は畳まない)。
+ *
+ * 注意: この規則はユーザーの記憶ベース。実機 (CIT_Wi-Fi) での matched pair 検証で
+ * 確証を得るまでは「7 始まり 3 桁」以外には適用しない (フェイルセーフ: 不一致側に倒す)。
+ * 残存リスク (medium): CIT 建物 7 に「畳まれた 3 桁由来でない native な 4 桁室番号
+ * (7X0Y 形)」が実在すると、それを 3 桁室へ畳んで誤一致する理論的フェイルオープンがある。
+ * auto 解禁 (M2) 前に実機 matched pair で 7 始まり室番号体系を確認して潰すこと。
+ */
+function toCanonicalCitRoom(core: string): string {
+  // WHY: 「7 始まり・4 桁・3 文字目が 0・**全桁が数字**」のときだけ畳む。
+  // 規則は 3 桁の数字教室コードが対象なので、英字/ハイフン/アンダースコアを含む
+  // 別教室 roomId (例 "7A01" や "7-01"。roomIdSchema は [A-Za-z0-9_-] を許容) を畳んで
+  // しまうと別教室と誤一致 (出席誤送信) する。数字限定の正規表現で厳密に絞る。
+  if (/^7\d0\d$/.test(core)) {
+    // "7301" → "731" (挿入された 0 を除去)
+    return core[0] + core[1] + core[3];
+  }
+  return core;
+}
+
+export function attendanceRoomMatches(
+  timetableRoom: string | null | undefined,
+  qrRoomId: string | null | undefined
+): boolean {
+  const t = normalizeRoom(timetableRoom);
+  const q = normalizeRoom(qrRoomId);
+
+  if (t.isEmpty || q.isEmpty) return false;
+
+  // 両方に英数字コアがあるなら、CIT 規則で UNIPA 正規形へ畳んで比較する。
+  if (t.core !== null && q.core !== null) {
+    return toCanonicalCitRoom(t.core) === toCanonicalCitRoom(q.core);
+  }
+
+  // 片方しかコアが無い → 異種表記とみなし不一致 (保守的)。
+  if (t.core !== null || q.core !== null) {
+    return false;
+  }
+
+  // 両方コア無し (日本語のみ等) → canonical 完全一致のみ許容。
+  return t.canonical === q.canonical;
+}

@@ -32,6 +32,7 @@ import {
   evaluateConfirmSubmitGuard,
   formatJstYmd,
   toAttendanceAuditLogCreateData,
+  attendanceRoomMatches,
   ATTENDANCE_QUEUE_NAME as SHARED_ATTENDANCE_QUEUE_NAME,
 } from '@chibatech/shared';
 import type {
@@ -431,7 +432,9 @@ async function evaluateAutoMethodGuard(
   const qrSessionValid =
     !!session &&
     session.expiresAt > input.now &&
-    session.roomId === input.timetable.room &&
+    // WHY: session.roomId は QR 由来 (出席システム "7301")、timetable.room は UNIPA
+    // 表記 ("731講義室")。CIT 規則 (7 始まり 3 桁に 0 挿入) を加味して突合する。
+    attendanceRoomMatches(input.timetable.room, session.roomId) &&
     (session.timetableId == null || session.timetableId === input.timetable.id);
 
   // pre-network: DB / 内部状態だけで判定。reject 時は adapter に触れない

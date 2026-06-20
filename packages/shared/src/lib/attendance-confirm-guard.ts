@@ -18,6 +18,7 @@ import {
   ATTENDANCE_LEAD_MINUTES,
   getJstParts,
 } from './attendance-schedule';
+import { attendanceRoomMatches } from './room-normalize';
 
 export interface ConfirmSubmitGuardInput {
   // --- API 入力 ---
@@ -105,7 +106,10 @@ export function evaluateConfirmSubmitGuard(
     return { allowed: false, reason: 'timetable_not_owned' };
   }
 
-  if (!input.timetableRoom || input.timetableRoom !== input.jobRoomId) {
+  // WHY: 時間割 (UNIPA "731講義室") と QR roomId (出席システム "7301") は表記系が違うため、
+  // CIT 規則 (7 始まり 3 桁に 0 挿入) を加味する attendanceRoomMatches で突合する。
+  // null/空 timetableRoom は matcher 側で不一致 (false) になる。
+  if (!attendanceRoomMatches(input.timetableRoom, input.jobRoomId)) {
     return { allowed: false, reason: 'room_mismatch' };
   }
 

@@ -156,6 +156,7 @@ export {
 export {
   normalizeRoom,
   roomsMatch,
+  attendanceRoomMatches,
   type NormalizedRoom,
 } from './lib/room-normalize';
 
