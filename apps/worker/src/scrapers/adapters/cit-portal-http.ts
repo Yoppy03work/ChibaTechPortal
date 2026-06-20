@@ -9,9 +9,11 @@ import type {
   ScraperAdapter,
   ScraperSession,
   ScrapedNotificationItem,
+  ScrapedTimetableEntry,
 } from '@chibatech/shared';
 import { ScraperLoginError, ScraperError } from '@chibatech/shared';
 import { sanitizeHtml } from '@chibatech/shared';
+import { parseTimetableHtml } from '../timetable-parser';
 
 // WHY: 既定は CIT の UNIPA ポータル。別キャンパス/セルフホストや stub 向けに
 // CIT_PORTAL_BASE_URL で上書き可能にする (institution ハードコードの排除)。
@@ -19,6 +21,8 @@ const BASE_URL =
   process.env.CIT_PORTAL_BASE_URL ?? 'https://portal.it-chiba.ac.jp/uprx';
 const LOGIN_PAGE_URL = `${BASE_URL}/up/pk/pky001/Pky00101.xhtml`;
 const NOTIFICATIONS_URL = `${BASE_URL}/up/pk/pky501/Pky50101.xhtml`;
+// WHY: 履修・時間割ページ (実 HTML の form action から特定: Kmd00801.xhtml)。
+const TIMETABLE_URL = `${BASE_URL}/up/km/kmd008/Kmd00801.xhtml`;
 
 // WHY: 定期メンテ AM2:00〜5:00 を考慮
 const USER_AGENT =
@@ -183,6 +187,42 @@ export class CitPortalHttpAdapter implements ScraperAdapter {
       if (error instanceof ScraperError) throw error;
       throw new ScraperError(
         'Failed to fetch CIT Portal notifications',
+        this.target,
+        this.name,
+        error
+      );
+    }
+  }
+
+  /**
+   * 時間割を取得する。
+   *
+   * WHY: 履修・時間割ページ (Kmd00801.xhtml) を取得し、parseTimetableHtml で各コマを抽出する。
+   * 注: JSF ページのため、直接 GET で時間割が描画されない環境では追加のナビゲーション
+   * (期の選択 POST 等) が要る場合がある。実 ログイン環境での live 検証で要確認 (best-effort)。
+   */
+  async fetchTimetable(session: ScraperSession): Promise<ScrapedTimetableEntry[]> {
+    try {
+      const resp = await fetch(TIMETABLE_URL, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          Cookie: cookiesToHeader(session.cookies),
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) {
+        throw new ScraperError(
+          `Failed to fetch timetable: ${resp.status}`,
+          this.target,
+          this.name
+        );
+      }
+      const html = await resp.text();
+      return parseTimetableHtml(html);
+    } catch (error) {
+      if (error instanceof ScraperError) throw error;
+      throw new ScraperError(
+        'Failed to fetch CIT Portal timetable',
         this.target,
         this.name,
         error
