@@ -6,20 +6,14 @@
  * attendance-job ワーカーが拾う。
  *
  * - Queue 名は shared で一元管理 (ATTENDANCE_QUEUE_NAME)
- * - Redis 接続は ioredis を Web プロセスで生成
- * - Worker と同じ Redis に接続する必要があるため、REDIS_URL を共有する
+ * - Redis 接続は web 共有の `redis` を再利用する (別接続を張らない)。
+ *   共有 redis は maxRetriesPerRequest:null + lazyConnect 済みで BullMQ 要件を満たす。
  */
 import { Queue, type ConnectionOptions } from 'bullmq';
-import IORedis from 'ioredis';
 import { ATTENDANCE_QUEUE_NAME } from '@chibatech/shared';
+import { redis } from './redis';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-
-// WHY: maxRetriesPerRequest: null は BullMQ の要件 (Worker と同じ)
-const redis = new IORedis(REDIS_URL, {
-  maxRetriesPerRequest: null,
-});
-
+// WHY: ioredis インスタンスは BullMQ の ConnectionOptions として渡せる。
 const bullmqConnection = redis as unknown as ConnectionOptions;
 
 export const attendanceQueue = new Queue(ATTENDANCE_QUEUE_NAME, {
