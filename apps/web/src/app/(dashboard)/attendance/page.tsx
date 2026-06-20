@@ -10,6 +10,10 @@ import { prisma } from '@chibatech/db';
 import { normalizeAttendanceSettings, summarizeAttendance } from '@chibatech/shared';
 import { AttendanceSettings } from './attendance-settings';
 import { ConfirmFlow } from './confirm-flow';
+import {
+  attendanceStatusLabel,
+  attendanceMethodLabel,
+} from '@/lib/attendance-labels';
 
 export default async function AttendancePage() {
   const session = await auth();
@@ -147,10 +151,10 @@ export default async function AttendancePage() {
                           : 'bg-gray-100 text-gray-600'
                     }`}
                   >
-                    {log.status === 'success' ? '出席' : log.status === 'failed' ? '失敗' : log.status}
+                    {attendanceStatusLabel(log.status)}
                   </span>
                   <span className="text-xs text-gray-400">
-                    {log.method === 'auto' ? '自動' : '手動'}
+                    {attendanceMethodLabel(log.method)}
                   </span>
                 </div>
               </div>
