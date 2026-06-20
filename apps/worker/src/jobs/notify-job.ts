@@ -7,6 +7,7 @@
 import { Worker, Queue } from 'bullmq';
 import { bullmqConnection } from '../lib/redis';
 import { prisma } from '@chibatech/db';
+import { getJstParts } from '@chibatech/shared';
 import { sendPushToUser } from '../services/push-notification';
 import { sendEmail } from '../services/email-notification';
 import { notificationEmail } from '@chibatech/email-templates';
@@ -122,12 +123,16 @@ export function startNotifyWorker() {
 
 /**
  * 現在がおやすみモード中かチェック
+ *
+ * WHY: quietHoursStart/End はユーザーの JST 設定。worker のコンテナ TZ (UTC) に依存して
+ * now.getHours() を使うと、JST 22:00 のおやすみが UTC 13:00 として誤判定され、リマインダ等が
+ * 違う時間帯で抑制/通過してしまう。getJstParts で JST の時/分を取り出して比較する。
  */
-function isQuietHours(start?: string, end?: string): boolean {
+export function isQuietHours(start?: string, end?: string): boolean {
   if (!start || !end) return false;
 
-  const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const jst = getJstParts(new Date());
+  const currentMinutes = jst.hour * 60 + jst.minute;
 
   const [startH, startM] = start.split(':').map(Number);
   const [endH, endM] = end.split(':').map(Number);
