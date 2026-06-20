@@ -154,6 +154,12 @@ export {
 } from './lib/attendance-schedule';
 
 export {
+  normalizeRoom,
+  roomsMatch,
+  type NormalizedRoom,
+} from './lib/room-normalize';
+
+export {
   summarizeAttendance,
   type AttendanceSummary,
   type AttendanceLogSummaryItem,

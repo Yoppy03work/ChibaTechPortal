@@ -1,0 +1,152 @@
+/**
+ * 教室名正規化 / 一致判定の単体テスト
+ *
+ * WHY: normalizeRoom / roomsMatch は将来 confirm/auto guard の room 比較に
+ * 差し込む候補だが、誤一致は「別教室/他人の出席を送る」事故に直結する。
+ * 全角/半角・suffix あり/なし・空白・null/空・別教室の非一致・同教室の一致を
+ * 網羅して、保守的挙動 (確信ある一致のみ true) を固定する。
+ *
+ * 実フォーマット根拠:
+ *   - 時間割側: "７３１講義室" / "オンライン" (timetable-parser.test.ts より)
+ *   - QR/confirm 側: '8109' / 'A-101' / '5_3' (attendance-qr.ts roomIdSchema コメント)
+ */
+import { describe, expect, it } from 'vitest';
+import { normalizeRoom, roomsMatch } from '../src/lib/room-normalize';
+
+describe('normalizeRoom', () => {
+  it('全角数字を半角化しコアを抽出する', () => {
+    const r = normalizeRoom('７３１');
+    expect(r.canonical).toBe('731');
+    expect(r.core).toBe('731');
+    expect(r.isEmpty).toBe(false);
+  });
+
+  it('全角数字 + 種別 suffix ("７３１講義室") をコア "731" に正規化する', () => {
+    const r = normalizeRoom('７３１講義室');
+    expect(r.canonical).toBe('731');
+    expect(r.core).toBe('731');
+  });
+
+  it('各種の教室種別 suffix を剥がす', () => {
+    expect(normalizeRoom('501演習室').core).toBe('501');
+    expect(normalizeRoom('A201実験室').core).toBe('A201');
+    expect(normalizeRoom('301実習室').core).toBe('301');
+    expect(normalizeRoom('101教室').core).toBe('101');
+    expect(normalizeRoom('B105室').core).toBe('B105');
+  });
+
+  it('suffix なしの半角コードはそのまま (大文字化のみ)', () => {
+    expect(normalizeRoom('8109').core).toBe('8109');
+    expect(normalizeRoom('a-101').core).toBe('A-101');
+    expect(normalizeRoom('5_3').core).toBe('5_3');
+  });
+
+  it('前後・内部の空白 (半角/全角) を除去する', () => {
+    expect(normalizeRoom('  731 講義室  ').core).toBe('731');
+    expect(normalizeRoom('７３１　講義室').core).toBe('731'); // 全角スペース
+    expect(normalizeRoom(' A-101 ').core).toBe('A-101');
+  });
+
+  it('全角英字・全角ハイフンを半角化する', () => {
+    expect(normalizeRoom('Ａ－１０１').core).toBe('A-101');
+  });
+
+  it('日本語のみ ("オンライン") は core=null で canonical を保持する', () => {
+    const r = normalizeRoom('オンライン');
+    expect(r.core).toBeNull();
+    expect(r.canonical).toBe('オンライン');
+    expect(r.isEmpty).toBe(false);
+  });
+
+  it('null / undefined / 空文字 / 空白のみは isEmpty', () => {
+    for (const v of [null, undefined, '', '   ', '　']) {
+      const r = normalizeRoom(v as string | null | undefined);
+      expect(r.isEmpty).toBe(true);
+      expect(r.core).toBeNull();
+      expect(r.canonical).toBe('');
+    }
+  });
+});
+
+describe('roomsMatch', () => {
+  it('全角時間割表記 と 半角 QR コードが同一教室なら一致する', () => {
+    expect(roomsMatch('７３１講義室', '731')).toBe(true);
+    expect(roomsMatch('731', '７３１講義室')).toBe(true); // 対称性
+  });
+
+  it('suffix あり/なしの差を吸収して一致する', () => {
+    expect(roomsMatch('501演習室', '501')).toBe(true);
+    expect(roomsMatch('A201実験室', 'a201')).toBe(true); // 大文字小文字も吸収
+  });
+
+  it('空白・全角ハイフンの差を吸収して一致する', () => {
+    expect(roomsMatch(' A-101 ', 'Ａ－１０１')).toBe(true);
+  });
+
+  it('別教室は一致しない', () => {
+    expect(roomsMatch('７３１講義室', '732')).toBe(false);
+    expect(roomsMatch('501演習室', '502')).toBe(false);
+    expect(roomsMatch('A-101', 'A-102')).toBe(false);
+    expect(roomsMatch('8109', '8110')).toBe(false);
+  });
+
+  it('同一の日本語のみ表記は一致、別表記は不一致', () => {
+    expect(roomsMatch('オンライン', 'オンライン')).toBe(true);
+    expect(roomsMatch('オンライン', 'リモート')).toBe(false);
+  });
+
+  it('片方が日本語のみ (core 無し)、片方が数値コードなら不一致 (保守的)', () => {
+    expect(roomsMatch('オンライン', '731')).toBe(false);
+    expect(roomsMatch('731', 'オンライン')).toBe(false);
+  });
+
+  it('null / 空 が絡む場合は常に不一致 (空 room を一致扱いしない)', () => {
+    expect(roomsMatch(null, '731')).toBe(false);
+    expect(roomsMatch('731', null)).toBe(false);
+    expect(roomsMatch(null, null)).toBe(false);
+    expect(roomsMatch('', '')).toBe(false);
+    expect(roomsMatch(undefined, '731')).toBe(false);
+    expect(roomsMatch('   ', '731')).toBe(false);
+  });
+
+  it('prefix / 部分一致は採らない (誤一致防止)', () => {
+    // "731" と "7310" を部分一致させない
+    expect(roomsMatch('731', '7310')).toBe(false);
+    expect(roomsMatch('７３１講義室', '7310')).toBe(false);
+  });
+});
+
+/**
+ * 回帰: 号館式の建物表記で「別教室を同一視する」false match を防ぐ。
+ *
+ * WHY: 旧実装はコア抽出に「先頭からの英数字 前方一致」を使い、漢字混在表記を
+ * 黙って切り詰めていた。'7号館131' と '7号館231' が両方コア '7' になり roomsMatch=true
+ * （別教室への出席誤送信）になっていた。修正後は「canonical 全体が ASCII のときのみ
+ * コア採用」とし、漢字混在は core=null（canonical 完全一致のみ許容）に倒す。
+ * マルチエージェントのアドバーサリアル検証で 3 レンズ一致で検出された high 指摘。
+ */
+describe('roomsMatch — 号館式建物表記の誤一致回帰', () => {
+  it('漢字混在表記はコアを部分抽出せず core=null に倒す', () => {
+    expect(normalizeRoom('7号館131').core).toBeNull();
+    expect(normalizeRoom('7号館131').canonical).toBe('7号館131');
+    expect(normalizeRoom('8号館109').core).toBeNull();
+    // suffix "室" を剥がしても "号" が残れば非ASCII → core=null（安全側）
+    expect(normalizeRoom('301号室').core).toBeNull();
+  });
+
+  it('同一棟の別教室を同一視しない (旧バグ: 両方 core="7")', () => {
+    expect(roomsMatch('7号館131', '7号館231')).toBe(false);
+    expect(roomsMatch('7号館131', '7')).toBe(false);
+    expect(roomsMatch('8', '8号館109')).toBe(false);
+  });
+
+  it('同一の漢字混在表記は canonical 完全一致で true', () => {
+    expect(roomsMatch('7号館131', '7号館131')).toBe(true);
+  });
+
+  it('記号を含む有効な roomId はコアを持ち自己一致する', () => {
+    expect(normalizeRoom('_3').core).toBe('_3');
+    expect(normalizeRoom('-101').core).toBe('-101');
+    expect(roomsMatch('5_3', '5_3')).toBe(true);
+  });
+});
