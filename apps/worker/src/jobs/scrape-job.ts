@@ -11,6 +11,7 @@ import { bullmqConnection } from '../lib/redis';
 import { prisma } from '@chibatech/db';
 import { createAdapter } from '../scrapers/adapter-factory';
 import { diffAndSave, diffAndSaveAssignments } from '../services/diff-engine';
+import { syncTimetable } from '../services/timetable-sync';
 import {
   getMasterKey,
   withDecryptedCredentials,
@@ -103,6 +104,23 @@ export function startScrapeWorker() {
               console.log(
                 `[${target}] User ${userId}: ${assignments.length} assignments fetched, ${newAssignments.length} new`
               );
+            }
+
+            // WHY: CIT Portal は時間割も取得して Timetable に同期する（手動編集は保護）。
+            // fetchTimetable が空（JSF 未描画の可能性）のときは sync をスキップし、取得失敗で
+            // scraped 行を誤って全削除しないようにする。
+            if (target === 'cit-portal' && adapter.fetchTimetable) {
+              const entries = await adapter.fetchTimetable(session);
+              if (entries.length > 0) {
+                const r = await syncTimetable(userId, entries);
+                console.log(
+                  `[${target}] User ${userId}: timetable sync +${r.created}/~${r.updated}/-${r.removed} (manual保護 ${r.skippedManual})`
+                );
+              } else {
+                console.warn(
+                  `[${target}] User ${userId}: timetable 0 件（JSF 未描画の可能性、sync スキップ）`
+                );
+              }
             }
           }
         );
