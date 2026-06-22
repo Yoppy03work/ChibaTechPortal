@@ -17,8 +17,10 @@ import { parseTimetableHtml } from '../timetable-parser';
 
 // WHY: 既定は CIT の UNIPA ポータル。別キャンパス/セルフホストや stub 向けに
 // CIT_PORTAL_BASE_URL で上書き可能にする (institution ハードコードの排除)。
+// 実機検証(2026-06)で正しいホストは portal.chibatech.ac.jp と判明 (旧 it-chiba.ac.jp は
+// 解決しない誤り。出席システムは別ドメイン attendance.is.it-chiba.ac.jp)。
 const BASE_URL =
-  process.env.CIT_PORTAL_BASE_URL ?? 'https://portal.it-chiba.ac.jp/uprx';
+  process.env.CIT_PORTAL_BASE_URL ?? 'https://portal.chibatech.ac.jp/uprx';
 const LOGIN_PAGE_URL = `${BASE_URL}/up/pk/pky001/Pky00101.xhtml`;
 const NOTIFICATIONS_URL = `${BASE_URL}/up/pk/pky501/Pky50101.xhtml`;
 // WHY: 履修・時間割ページ (実 HTML の form action から特定: Kmd00801.xhtml)。
@@ -58,11 +60,19 @@ export class CitPortalHttpAdapter implements ScraperAdapter {
   readonly target = 'cit-portal' as const;
 
   /**
-   * CIT PortalにフォームPOSTでログインする
+   * CIT Portalにログインする (直接フォーム = ゲスト/学外者向け)
    *
-   * フロー:
+   * ⚠️ 重要 (実機検証 2026-06): このフォームログインは **ゲスト/学外者専用**。
+   * ログインページ自身が「在学生・教職員は『在学生・教職員専用ログイン（統合認証）』を
+   * クリックしてログイン」と案内しており、在学生は **Shibboleth SSO**
+   * (`/uprx/ShibbolethAuthServlet` → IdP → SAML) を通る必要がある。在学生の creds を
+   * この直接フォームに POST すると「ユーザＩＤまたはパスワードが正しくありません」で
+   * 弾かれ、規定回数失敗で **アカウントが一時ロック**される。在学生のスクレイピングを
+   * 動かすには SSO ログインの実装が別途必要 (follow-up)。
+   *
+   * フロー (直接フォーム):
    * 1. ログインページGET → ViewState + cookies取得
-   * 2. ログインPOST（ViewState必須）→ セッションcookies取得
+   * 2. ログインPOST（ViewState + loginForm:loginButton 必須）→ セッションcookies取得
    */
   async login(userId: string, password: string): Promise<ScraperSession> {
     try {
@@ -102,6 +112,10 @@ export class CitPortalHttpAdapter implements ScraperAdapter {
           loginForm: 'loginForm',
           'loginForm:userId': userId,
           'loginForm:password': password,
+          // WHY: JSF は submit ボタンの component 名が POST に無いと login アクションを
+          // 起動せず、ログインページを再描画するだけになる (実フォーム実測: <button
+          // type=submit name=loginForm:loginButton>)。これを送って初めて認証が走る。
+          'loginForm:loginButton': '',
           'javax.faces.ViewState': viewState,
         }),
         redirect: 'manual',

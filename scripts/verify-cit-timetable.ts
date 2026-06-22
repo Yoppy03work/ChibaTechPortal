@@ -31,8 +31,11 @@ import { CitPortalHttpAdapter } from '../apps/worker/src/scrapers/adapters/cit-p
 import { parseTimetableHtml } from '../apps/worker/src/scrapers/timetable-parser';
 import type { ScraperSession } from '@chibatech/shared';
 
+// 実機検証(2026-06)で正しいホストは portal.chibatech.ac.jp と判明。
+// 注意: 在学生は Shibboleth SSO 経由のため、この直接フォーム検証は creds が
+// ゲスト/学外向けのときのみ成功する (在学生 creds は弾かれる)。
 const BASE_URL =
-  process.env.CIT_PORTAL_BASE_URL ?? 'https://portal.it-chiba.ac.jp/uprx';
+  process.env.CIT_PORTAL_BASE_URL ?? 'https://portal.chibatech.ac.jp/uprx';
 const TIMETABLE_URL = `${BASE_URL}/up/km/kmd008/Kmd00801.xhtml`;
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
