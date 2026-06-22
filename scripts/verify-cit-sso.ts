@@ -2,8 +2,9 @@
  * #1 (SSO 版) CIT ポータル時間割の live 検証ツール。
  *
  * 在学生は統合認証 (Keycloak + MFA/TOTP) 経由でしかログインできないため、移植した
- * SSO スクレイパ (apps/worker/src/scrapers/cit-portal) を本番同一経路で 1 コマンド実行し、
- * 認証→時間割取得→ScrapedTimetableEntry へのマッピングまでを確認する。
+ * SSO ログイン (apps/worker/src/scrapers/cit-portal) で認証済み時間割 HTML を取得し、
+ * ChibaTechPortal の検証済みパーサ (timetable-parser.ts) で ScrapedTimetableEntry に
+ * 落とすところまでを本番同一経路で 1 コマンド確認する。
  *
  * 必要 env (creds は .tmp/cit.env 等に置いてソース実行。値は出力しない):
  *   - CIT_PORTAL_USER_ID      学籍 ID (統合認証 username)
@@ -11,16 +12,16 @@
  *   - CIT_PORTAL_TOTP_SECRET  認証アプリの BASE32 シークレット (MFA 必須)
  *   - CIT_PORTAL_TOTP_DEVICE  (任意) 複数 TOTP デバイス時に選ぶデバイス名の部分一致
  *   - CIT_PORTAL_BASE_URL     (任意) 既定 https://portal.chibatech.ac.jp
- *   - CIT_PORTAL_DEBUG=1       (任意) 各段の HTML サイズ/検出フォームをログ
+ *   - CIT_PORTAL_DEBUG=1       (任意) 各段の HTML サイズ/検出フォームをログ (秘密は redact 済)
  *
  * 副作用: 統合認証へのログイン (読み取りのみ。出席送信・履修変更・DB 書込なし)。
  * 失敗時は終了コードで示す: 2=env不足, 3=ログイン/取得失敗。
  */
 import {
-  fetchCitPortalTimetable,
+  fetchCitPortalTimetableHtml,
   CitPortalError,
 } from '../apps/worker/src/scrapers/cit-portal/cit-portal-scraper';
-import { citPortalClassToScrapedEntries } from '../apps/worker/src/scrapers/cit-portal/to-scraped-entry';
+import { parseTimetableHtml } from '../apps/worker/src/scrapers/timetable-parser';
 
 async function main() {
   const userId = process.env.CIT_PORTAL_USER_ID;
@@ -38,12 +39,15 @@ async function main() {
   }
 
   try {
-    const classes = await fetchCitPortalTimetable(userId, password, totpSecret, deviceName);
-    const entries = citPortalClassToScrapedEntries(classes);
+    const html = await fetchCitPortalTimetableHtml(userId, password, totpSecret, deviceName);
+    const entries = parseTimetableHtml(html);
+    if (entries.length === 0) {
+      console.error('[NG] ログインは通ったが classTable から 0 コマ。menuForm nav か parser を要確認。');
+      process.exit(3);
+    }
     const rooms = [...new Set(entries.map((e) => e.room).filter(Boolean))];
-    console.log('[OK] ログイン + 時間割取得 成功');
-    console.log('  CitPortalClass 数:', classes.length);
-    console.log('  ScrapedTimetableEntry 数(per-period 展開後):', entries.length);
+    console.log('[OK] ログイン + 時間割取得 + パース 成功');
+    console.log('  ScrapedTimetableEntry 数:', entries.length);
     console.log('  room ユニーク:', rooms.join(' | '));
     console.log('  dayOfWeek 範囲:',
       Math.min(...entries.map((e) => e.dayOfWeek)), '-', Math.max(...entries.map((e) => e.dayOfWeek)));

@@ -6,7 +6,10 @@
 //   OTP→SAML→UNIPA menuForm nav)を素の fetch で再現する。上流(Keycloak/UNIPA)は
 //   変わり続けるため、モチカタ版と構造を揃えて同期しやすく保つこと。
 //   cheerio + otpauth のみに依存し、ChibaTechPortal の他層には依存しない(意図的)。
-//   ScrapedTimetableEntry への変換は ./to-scraped-entry.ts が担う。
+//   このモジュールは「ログイン+認証済み時間割 HTML の取得」までを担い、HTML の
+//   パースは ChibaTechPortal 検証済みの header ベースパーサ (timetable-parser.ts) に
+//   委譲する(パーサ of record を一本化し、曜日の位置依存を避けるため)。
+//   モチカタ版の parseTimetableHtml は移植時に意図的に持ち込まない(差分は login 部のみ同期)。
 //
 // 認証フロー:
 //   1. GET https://portal.chibatech.ac.jp/uprx/up/bs/bsa001/Bsa00101.xhtml
@@ -27,25 +30,8 @@
 //   - CIT_PORTAL_DEBUG=1: 各ステップ後の HTML サイズと検出フォームをログ出力
 
 import * as cheerio from "cheerio";
-import type { AnyNode, Element } from "domhandler";
+import type { AnyNode } from "domhandler";
 import { TOTP } from "otpauth";
-
-export type CitPortalClass = {
-  // 月=1, 火=2, 水=3, 木=4, 金=5, 土=6
-  dayOfWeek: number;
-  // 開始限・終了限 (1-10)。連続コマは 2-4 等のレンジになる
-  period: number;
-  endPeriod: number;
-  // 表示開始/終了時刻 ("HH:MM" 形式)
-  startTime: string;
-  endTime: string;
-  courseName: string;
-  classroom: string | null;
-  teacher: string | null;
-  // 学期境界(前期/後期)。manualで上書き可能だが、cron同期では毎回上書きされる。
-  effectiveFrom: Date | null;
-  effectiveTo: Date | null;
-};
 
 export class CitPortalError extends Error {
   constructor(
@@ -156,8 +142,18 @@ async function portalFetch(
           : cause
             ? String(cause)
             : "unknown";
+      // WHY: クエリ文字列を落として origin+pathname のみログに残す。Keycloak の
+      // リダイレクト URL は SAMLRequest/RelayState を query に持ち、例外メッセージ経由で
+      // SSO リクエストパラメータがログ/例外トラッカに乗るのを避ける。
+      let safeUrl = currentUrl;
+      try {
+        const u = new URL(currentUrl);
+        safeUrl = `${u.origin}${u.pathname}`;
+      } catch {
+        /* noop */
+      }
       throw new CitPortalError(
-        `${e instanceof Error ? e.message : "fetch failed"} url=${currentUrl} cause=${causeMsg}`,
+        `${e instanceof Error ? e.message : "fetch failed"} url=${safeUrl} cause=${causeMsg}`,
         "fetch",
       );
     }
@@ -532,25 +528,12 @@ async function login(
       chosenCredId = matched.id;
     }
     if (DEBUG) {
+      // WHY(redacted): 生 HTML ダンプはしない。OTP フォームの生 HTML には
+      // selectedCredentialId(TOTP デバイスの credential UUID)が含まれ、ログに残ると
+      // MFA デバイス識別子の漏洩になる。パース済みの「ラベル + 切り詰め id」だけ出す。
       console.log(
         `[cit-portal][otp-credentials] options=${opts.length === 0 ? "(none)" : opts.map((o) => `"${o.label}"#${o.id.slice(0, 8)}`).join(", ")} matched=${matched ? matched.label : "(none, using default)"}`,
       );
-      // マッチできなかった/オプションが少なすぎる場合は、OTPフォーム周辺の HTMLを
-      // 8KB分ダンプして構造を確認する(機微情報を含まない前提、本番ではDEBUG=0)
-      if (!matched) {
-        const $otp2 = cheerio.load(html);
-        const $form = $otp2("form#kc-otp-login-form");
-        const formHtml = $otp2.html($form) || "";
-        const parentHtml = $otp2.html($form.parent()) || "";
-        // フォーム自身ではなく親(=同じカード/コンテナ)の生HTMLが欲しい
-        // pc(motica)/スマホ といった文字列の周辺を見たい
-        console.log(
-          `[cit-portal][otp-credentials] form HTML (first 4KB):\n${formHtml.slice(0, 4000)}`,
-        );
-        console.log(
-          `[cit-portal][otp-credentials] parent HTML (first 4KB):\n${parentHtml.slice(0, 4000)}`,
-        );
-      }
     }
   }
 
@@ -661,12 +644,10 @@ async function login(
     console.log(
       `[cit-portal][saml-post] meta-refresh=${metaRefresh?.[1] ?? "(none)"} js-redirect=${jsRedirect?.[1] ?? "(none)"} err="${errorMsg}"`,
     );
-    // <body> セクションの中身だけ抽出して 16KB まで
-    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    const bodyContent = bodyMatch ? bodyMatch[1] : html;
-    console.log(
-      `[cit-portal][saml-post] body content (first 16KB):\n${bodyContent.slice(0, 16000)}`,
-    );
+    // WHY(redacted): post-auth レスポンス body の生ダンプはしない。この body には
+    // rx-token / rx-loginKey / javax.faces.ViewState などの live JSF セッション秘密が
+    // hidden input として含まれ、ログに残ると認証済みセッションの乗っ取りに使える。
+    // 構造把握には下の「form 構造(input は name のみ)」で十分。
     // form 構造を整理
     const $ck = cheerio.load(html);
     $ck("form").each((_, fEl) => {
@@ -853,194 +834,6 @@ async function login(
 }
 
 // ─────────────────────────────────────────
-// 時間割パース
-// ─────────────────────────────────────────
-function hhmm(h: number, m: number): string {
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-function periodStartTime(period: number): string {
-  // 1限=09:00, 2限=10:00, ..., 10限=18:00
-  return hhmm(8 + period, 0);
-}
-
-function periodEndTime(period: number): string {
-  // 各限60分: 1限の終わりが10:00, ..., 10限の終わりは19:00
-  return hhmm(9 + period, 0);
-}
-
-function semesterRange(
-  year: number,
-  isFirstHalf: boolean,
-): { from: Date; to: Date } {
-  // JST 基準:
-  //   前期 = 4/1 00:00 JST 〜 9/30 23:59 JST
-  //   後期 = 10/1 00:00 JST 〜 (year+1) 3/31 23:59 JST
-  // JSTは UTC+9 なので Date.UTC で時刻を9時間前にずらして「JSTの00:00」を作る。
-  if (isFirstHalf) {
-    return {
-      from: new Date(Date.UTC(year, 3, 1, -9, 0, 0)), // 4/1 00:00 JST
-      to: new Date(Date.UTC(year, 9, 0, 14, 59, 59)), // 9/30 23:59 JST
-    };
-  }
-  return {
-    from: new Date(Date.UTC(year, 9, 1, -9, 0, 0)), // 10/1 00:00 JST
-    to: new Date(Date.UTC(year + 1, 3, 0, 14, 59, 59)), // 3/31 23:59 JST
-  };
-}
-
-function extractClassesFromTable(
-  $: cheerio.CheerioAPI,
-  table: Element,
-): CitPortalClass[] {
-  const $table = $(table);
-  const out: CitPortalClass[] = [];
-
-  // legend から年度・前期/後期 を読む
-  const legend = $table.closest("fieldset").find("legend").text().trim();
-  const yearMatch = legend.match(/(\d{4})/);
-  const isFirstHalf = legend.includes("前期");
-  // legend に4桁年が無い場合の fallback。
-  //
-  // semesterRange の引数 `year` の定義:
-  //   前期 → その year の 4/1 〜 9/30
-  //   後期 → その year の 10/1 〜 (year+1) の 3/31
-  // つまり 後期 を 1〜3月に同期する状況では、現在進行中の 後期 は
-  // 前年 10月始まりのもの = year = jstYear - 1 が正しい。
-  // 旧 fallback (現在 JST 年そのまま) では Feb 2026 に 後期 を同期すると
-  // Oct 2026 - Mar 2027 にずれて effectiveFrom > 今日 になり、expandToday
-  // が「今日は学期外」として授業 EVENT を作らなくなる事故が起きていた。
-  const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const jstYear = jstNow.getUTCFullYear();
-  const jstMonth = jstNow.getUTCMonth() + 1; // 1..12
-  const yearFallback =
-    !isFirstHalf && jstMonth <= 3 ? jstYear - 1 : jstYear;
-  const year = yearMatch ? Number(yearMatch[1]) : yearFallback;
-  const { from: effectiveFrom, to: effectiveTo } = semesterRange(
-    year,
-    isFirstHalf,
-  );
-
-  $table.find("tbody > tr").each((_, tr) => {
-    const $cells = $(tr).find("td");
-    const periodText = $cells.eq(0).text().trim();
-    const period = Number(periodText);
-    if (!period || !Number.isFinite(period)) return;
-
-    // 月-土 = idx 1..6
-    for (let dayIdx = 0; dayIdx < 6; dayIdx++) {
-      const $cell = $cells.eq(1 + dayIdx);
-      if ($cell.length === 0) continue;
-      const $info = $cell.find(".jugyo-info").first();
-      if ($info.length === 0) continue;
-      if ($info.hasClass("noClass")) continue;
-
-      const courseName = $info.find(".fontB").first().text().trim();
-      if (!courseName) continue;
-
-      // 教員と教室を div の並びから推定
-      // パターン:
-      //   <div class="fontB">{科目}</div>
-      //   <div class="">{教員}</div>
-      //   <div class=""><span>{教室}</span>／<span>{キャンパス}</span></div>
-      //   <div class="taniSu">{単位数}</div>
-      //   <div class="sign signClass">{種別}</div>
-      //   <div>{ボタン等}</div>
-      let teacher: string | null = null;
-      let classroom: string | null = null;
-      $info.children("div").each((_, divEl) => {
-        const $div = $(divEl);
-        if (
-          $div.hasClass("fontB") ||
-          $div.hasClass("taniSu") ||
-          $div.hasClass("sign") ||
-          $div.hasClass("noTextIconLine")
-        ) {
-          return;
-        }
-        if ($div.find("button").length > 0) return;
-        // 教室/キャンパスは <span>{教室}</span><span>{キャンパス}</span> の形。
-        // 後期で未確定の場合は <span></span><span>{キャンパス}</span> となり、
-        // 空spanのときは classroom = null (構造で判定し、教員と取り違えない)。
-        const $spans = $div.children("span");
-        if ($spans.length >= 2) {
-          const roomText = $spans.first().text().trim();
-          classroom = roomText || null;
-          return;
-        }
-        const text = $div.text().trim();
-        if (!text) return;
-        if (teacher === null) teacher = text;
-      });
-
-      out.push({
-        dayOfWeek: dayIdx + 1,
-        period,
-        endPeriod: period,
-        startTime: periodStartTime(period),
-        endTime: periodEndTime(period),
-        courseName,
-        classroom,
-        teacher,
-        effectiveFrom,
-        effectiveTo,
-      });
-    }
-  });
-
-  return out;
-}
-
-/**
- * 連続コマ統合: 同じ (effectiveFrom, dayOfWeek, courseName) で
- * period が連続している行を 1 行にまとめ endPeriod / endTime を伸ばす。
- */
-function mergeConsecutivePeriods(rows: CitPortalClass[]): CitPortalClass[] {
-  const sorted = [...rows].sort((a, b) => {
-    const af = a.effectiveFrom?.getTime() ?? 0;
-    const bf = b.effectiveFrom?.getTime() ?? 0;
-    if (af !== bf) return af - bf;
-    if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
-    return a.period - b.period;
-  });
-  const merged: CitPortalClass[] = [];
-  for (const r of sorted) {
-    const last = merged[merged.length - 1];
-    if (
-      last &&
-      last.effectiveFrom?.getTime() === r.effectiveFrom?.getTime() &&
-      last.dayOfWeek === r.dayOfWeek &&
-      last.courseName === r.courseName &&
-      last.endPeriod + 1 === r.period &&
-      last.classroom === r.classroom &&
-      last.teacher === r.teacher
-    ) {
-      last.endPeriod = r.period;
-      last.endTime = r.endTime;
-      continue;
-    }
-    merged.push({ ...r });
-  }
-  return merged;
-}
-
-export function parseTimetableHtml(html: string): CitPortalClass[] {
-  const $ = cheerio.load(html);
-  const tables = $("table.classTable").toArray();
-  if (tables.length === 0) {
-    throw new CitPortalError(
-      "時間割テーブル(table.classTable)が見つかりません",
-      "parse",
-    );
-  }
-  const all: CitPortalClass[] = [];
-  for (const t of tables) {
-    all.push(...extractClassesFromTable($, t as Element));
-  }
-  return mergeConsecutivePeriods(all);
-}
-
-// ─────────────────────────────────────────
 // TOTP
 // ─────────────────────────────────────────
 export function generateTotpCode(secretBase32: string): string {
@@ -1057,16 +850,24 @@ export function generateTotpCode(secretBase32: string): string {
 // エントリーポイント
 // ─────────────────────────────────────────
 /**
- * CITポータルから時間割を取得する。
+ * CITポータルに統合認証(SSO+MFA)でログインし、認証済みの時間割ページ HTML を返す。
+ *
+ * パースはこのモジュールでは行わず、ChibaTechPortal の検証済み header ベースパーサ
+ * (`apps/worker/src/scrapers/timetable-parser.ts` の parseTimetableHtml) に委譲する
+ * (曜日をテーブルヘッダから導出し、位置依存の誤曜日化を避けるため。パーサ of record を一本化)。
+ *
+ * ⚠️ production パスへ配線するときは必ず SCRAPE_ENABLED ゲート下でのみ呼ぶこと
+ * (この関数自体はゲートを持たず、呼べば即 SSO ログイン=外部アクセスを実行する)。
+ * 現状はどの production パスからも未 import の verify-only。
  *
  * @throws CitPortalError 各ステージで失敗した場合
  */
-export async function fetchCitPortalTimetable(
+export async function fetchCitPortalTimetableHtml(
   username: string,
   password: string,
   totpSecret: string,
   totpDeviceName: string | null = null,
-): Promise<CitPortalClass[]> {
+): Promise<string> {
   const baseUrl = (process.env.CIT_PORTAL_BASE_URL ?? DEFAULT_BASE).replace(
     /\/$/,
     "",
@@ -1078,13 +879,5 @@ export async function fetchCitPortalTimetable(
     );
   }
   const jar: HostCookieJar = new Map();
-  const html = await login(
-    jar,
-    baseUrl,
-    username,
-    password,
-    totpSecret,
-    totpDeviceName,
-  );
-  return parseTimetableHtml(html);
+  return login(jar, baseUrl, username, password, totpSecret, totpDeviceName);
 }
