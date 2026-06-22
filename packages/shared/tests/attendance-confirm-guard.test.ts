@@ -61,6 +61,18 @@ describe('evaluateConfirmSubmitGuard', () => {
     expect(r).toEqual({ allowed: false, reason: 'room_mismatch' });
   });
 
+  it('UNIPA 表記 ("731講義室") と QR roomId ("7301") は CIT 規則で一致し allowed', () => {
+    // WHY: 時間割は UNIPA の "731講義室"、QR は出席システムの "7301"。
+    // attendanceRoomMatches (7 始まり 3 桁の 0 挿入規則) で突合され room_mismatch に
+    // ならないことを end-to-end で固定する。
+    const r = evaluateConfirmSubmitGuard({
+      ...validInput(),
+      timetableRoom: '７３１講義室',
+      jobRoomId: '7301',
+    });
+    expect(r).toEqual({ allowed: true });
+  });
+
   it('classDate が今日でなければ class_date_mismatch', () => {
     // 昨日を指定
     const r = evaluateConfirmSubmitGuard({

@@ -11,7 +11,11 @@
  *   - QR/confirm 側: '8109' / 'A-101' / '5_3' (attendance-qr.ts roomIdSchema コメント)
  */
 import { describe, expect, it } from 'vitest';
-import { normalizeRoom, roomsMatch } from '../src/lib/room-normalize';
+import {
+  normalizeRoom,
+  roomsMatch,
+  attendanceRoomMatches,
+} from '../src/lib/room-normalize';
 
 describe('normalizeRoom', () => {
   it('全角数字を半角化しコアを抽出する', () => {
@@ -148,5 +152,61 @@ describe('roomsMatch — 号館式建物表記の誤一致回帰', () => {
     expect(normalizeRoom('_3').core).toBe('_3');
     expect(normalizeRoom('-101').core).toBe('-101');
     expect(roomsMatch('5_3', '5_3')).toBe(true);
+  });
+});
+
+/**
+ * attendanceRoomMatches — CIT 出席システムの教室コード対応規則。
+ *
+ * 規則 (ユーザー提供): 「3 桁の教室のうち 7 始まりの教室のみ、2 桁目と 3 桁目の間に
+ * 0 が挿入される」。UNIPA "731" ⇔ 出席システム QR "7301"。7 始まり以外は変換なし。
+ * 実例 https://attendance.is.it-chiba.ac.jp/attendance/class_room/7301 が時間割
+ * "７３１講義室" に対応する。
+ */
+describe('attendanceRoomMatches — CIT 7始まり3桁の0挿入規則', () => {
+  it('UNIPA "731講義室" と QR "7301" を一致させる (核心の matched pair)', () => {
+    expect(attendanceRoomMatches('７３１講義室', '7301')).toBe(true);
+    expect(attendanceRoomMatches('731', '7301')).toBe(true);
+    // 時間割側を QR 形式で手入力しても一致 (双方向)
+    expect(attendanceRoomMatches('7301', '7301')).toBe(true);
+  });
+
+  it('7 始まりの他教室も規則どおり対応する (0 は 2桁目と3桁目の間に挿入)', () => {
+    expect(attendanceRoomMatches('701', '7001')).toBe(true); // 70_1 → 7001
+    expect(attendanceRoomMatches('712講義室', '7102')).toBe(true); // 71_2 → 7102
+    expect(attendanceRoomMatches('799', '7909')).toBe(true); // 79_9 → 7909
+    // "7099" は挿入位置 (3文字目) が 0 でない → どの 3 桁教室の QR 形でもない
+    expect(attendanceRoomMatches('799', '7099')).toBe(false);
+  });
+
+  it('7 始まり以外の 3 桁教室は変換なしで素通し', () => {
+    expect(attendanceRoomMatches('431講義室', '431')).toBe(true);
+    expect(attendanceRoomMatches('612', '612')).toBe(true);
+    expect(attendanceRoomMatches('8109', '8109')).toBe(true);
+    // 4 始まりに 0 挿入版を渡しても一致しない (規則は 7 始まりのみ)
+    expect(attendanceRoomMatches('431', '4301')).toBe(false);
+  });
+
+  it('別教室は一致しない (誤一致防止・畳み込みの衝突なし)', () => {
+    expect(attendanceRoomMatches('731', '7302')).toBe(false); // 7301 ではない
+    expect(attendanceRoomMatches('731', '732')).toBe(false);
+    expect(attendanceRoomMatches('7301', '7310')).toBe(false); // 7310 は0が3文字目でない→畳まない
+    expect(attendanceRoomMatches('731', '7031')).toBe(false); // 7031 も畳まない
+  });
+
+  it('英字/記号を含む roomId は畳まない (フェイルオープン回帰: アドバーサリアル検証で検出した high)', () => {
+    // roomIdSchema は [A-Za-z0-9_-] を許容 → "7A01" 等の有効な別教室 QR が到達しうる。
+    // 数字限定の畳み込みでないと "7A01"→"7A1" の誤一致で別教室の出席を送る事故になる。
+    expect(attendanceRoomMatches('7A1', '7A01')).toBe(false);
+    expect(attendanceRoomMatches('7-1', '7-01')).toBe(false);
+    expect(attendanceRoomMatches('7_1', '7_01')).toBe(false);
+    expect(attendanceRoomMatches('7A0B', '7AB')).toBe(false);
+  });
+
+  it('null / 空 / 日本語のみ は保守的に扱う', () => {
+    expect(attendanceRoomMatches(null, '7301')).toBe(false);
+    expect(attendanceRoomMatches('731', null)).toBe(false);
+    expect(attendanceRoomMatches('オンライン', 'オンライン')).toBe(true);
+    expect(attendanceRoomMatches('オンライン', '7301')).toBe(false);
   });
 });
