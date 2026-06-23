@@ -881,3 +881,77 @@ export async function fetchCitPortalTimetableHtml(
   const jar: HostCookieJar = new Map();
   return login(jar, baseUrl, username, password, totpSecret, totpDeviceName);
 }
+
+/**
+ * 認証済みセッションの menuForm を menuid 指定で別機能へ遷移し、その HTML を返す。
+ * login() の時間割ナビと同じ menuForm POST パターン (Faces-Request ajax は付けない)。
+ */
+async function navigateMenuById(
+  jar: HostCookieJar,
+  baseUrl: string,
+  currentHtml: string,
+  menuid: string,
+): Promise<string> {
+  const $ = cheerio.load(currentHtml);
+  const $menu = $('form#menuForm, form[id$=":menuForm"]').first();
+  const fields: Record<string, string> = {};
+  $menu.find("input").each((_, el) => {
+    const name = $(el).attr("name");
+    if (name) fields[name] = $(el).attr("value") ?? "";
+  });
+  const action = new URL(
+    $menu.attr("action") || `${baseUrl}${TIMETABLE_PATH}`,
+    baseUrl,
+  ).toString();
+  const body = new URLSearchParams();
+  for (const [k, v] of Object.entries(fields)) body.set(k, v);
+  body.set("menuForm", "menuForm");
+  body.set("rx.sync.source", "menuForm:mainMenu");
+  body.set("menuForm:mainMenu", "menuForm:mainMenu");
+  body.set("menuForm:mainMenu_menuid", menuid);
+  const r = await portalFetch(jar, action, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Origin: new URL(action).origin,
+      Referer: action,
+    },
+    body: body.toString(),
+  });
+  return r.res.text();
+}
+
+/**
+ * CIT ポータルに SSO ログインし、掲示板 (お知らせ) ページの HTML を返す。
+ * パースは notifications-parser.ts (parseCitPortalNotifications) に委譲する。
+ *
+ * ⚠️ production 配線時は SCRAPE_ENABLED ゲート下でのみ呼ぶこと (login と同じ)。
+ */
+export async function fetchCitPortalNotificationsHtml(
+  username: string,
+  password: string,
+  totpSecret: string,
+  totpDeviceName: string | null = null,
+): Promise<string> {
+  const baseUrl = (process.env.CIT_PORTAL_BASE_URL ?? DEFAULT_BASE).replace(
+    /\/$/,
+    "",
+  );
+  if (!username || !password || !totpSecret) {
+    throw new CitPortalError(
+      "認証情報(ユーザーID/パスワード/TOTPシークレット)が空です",
+      "config",
+    );
+  }
+  const jar: HostCookieJar = new Map();
+  // login() で SSO 認証 (時間割ページに着地・menuForm を含む) → 掲示板(0_3_0_0)へ遷移。
+  const html = await login(
+    jar,
+    baseUrl,
+    username,
+    password,
+    totpSecret,
+    totpDeviceName,
+  );
+  return navigateMenuById(jar, baseUrl, html, "0_3_0_0");
+}
