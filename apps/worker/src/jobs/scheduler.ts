@@ -16,8 +16,12 @@ import { scrapeQueue } from './scrape-job';
 import { attendanceQueue } from './attendance-job';
 import { notifyQueue } from './notify-job';
 import { isAutoExecutionEnabled, isUserAllowlisted } from '../lib/attendance-rollout';
+import { isCitTimetableSyncEnabled } from '../lib/cit-portal-env';
+import { runCitTimetableSync } from '../services/cit-timetable-sync';
 
 const SCRAPE_INTERVAL_MS = 15 * 60 * 1000; // 15分
+// WHY: 時間割は学期単位の低頻度変更。SSO ログインも重いので 1 日間隔で十分。
+const CIT_TIMETABLE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 1日
 const ATTENDANCE_CHECK_INTERVAL_MS = 60 * 1000; // 1分（授業時間チェック）
 const JITTER_MAX_MS = 3 * 60 * 1000; // ±3分
 
@@ -256,6 +260,23 @@ export function startScheduler() {
     console.log('[scheduler] scrape disabled (SCRAPE_ENABLED!=true)');
   }
 
+  // CIT 時間割の SSO 自動同期 (env ベース)。SCRAPE_ENABLED + CIT_TIMETABLE_SYNC_ENABLED +
+  // creds(env) が揃うときだけ。secret は DB ではなくコンテナ env に置く方針。低頻度(起動時+1日)。
+  let citTimetableSyncInterval: ReturnType<typeof setInterval> | undefined;
+  if (isCitTimetableSyncEnabled()) {
+    const runSync = () =>
+      runCitTimetableSync().catch((err) =>
+        console.error(
+          '[scheduler] CIT timetable sync failed:',
+          err instanceof Error ? err.message : err
+        )
+      );
+    runSync();
+    citTimetableSyncInterval = setInterval(runSync, CIT_TIMETABLE_SYNC_INTERVAL_MS);
+  } else {
+    console.log('[scheduler] CIT timetable sync disabled');
+  }
+
   // 出席: 1分間隔で授業時間チェック + confirm リマインダ
   const attendanceInterval = setInterval(() => {
     enqueueAttendanceJobs().catch((err) => {
@@ -266,5 +287,5 @@ export function startScheduler() {
     });
   }, ATTENDANCE_CHECK_INTERVAL_MS);
 
-  return { scrapeInterval, attendanceInterval };
+  return { scrapeInterval, citTimetableSyncInterval, attendanceInterval };
 }
