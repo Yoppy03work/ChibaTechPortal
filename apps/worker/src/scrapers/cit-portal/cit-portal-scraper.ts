@@ -955,3 +955,145 @@ export async function fetchCitPortalNotificationsHtml(
   );
   return navigateMenuById(jar, baseUrl, html, "0_3_0_0");
 }
+
+// ─────────────────────────────────────────
+// シラバス照会 (Kmh006) — stateful JSF partial-ajax
+// ─────────────────────────────────────────
+const SYLLABUS_MENU_ID = "2_0_0_2";
+
+/** partial-response XML から指定 id の <update> CDATA を取り出す。 */
+function extractPartialUpdate(xml: string, id: string): string | null {
+  const re = new RegExp(
+    '<update id="' +
+      id.replace(/[:.]/g, "\\$&") +
+      '"><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></update>',
+  );
+  const m = xml.match(re);
+  return m ? m[1] : null;
+}
+
+/** partial-response XML から更新後の ViewState 値を取り出す。 */
+function extractPartialViewState(xml: string): string | null {
+  const m = xml.match(
+    /<update id="[^"]*ViewState[^"]*"><!\[CDATA\[([\s\S]*?)\]\]><\/update>/,
+  );
+  return m ? m[1] : null;
+}
+
+/** フォーム scope 内の input/select/textarea の現在値を URLSearchParams に集める。 */
+function collectFormFields(
+  $: cheerio.CheerioAPI,
+  $scope: cheerio.Cheerio<AnyNode>,
+): URLSearchParams {
+  const b = new URLSearchParams();
+  $scope.find("input,select,textarea").each((_, el) => {
+    const $e = $(el);
+    const name = $e.attr("name");
+    if (!name || /focus$/.test(name)) return;
+    const ty = ($e.attr("type") || "").toLowerCase();
+    if (ty === "checkbox" || ty === "radio") {
+      if ($e.attr("checked") !== undefined) b.append(name, $e.attr("value") ?? "on");
+      return;
+    }
+    if ((el as { tagName?: string }).tagName === "select") {
+      const sel = $e.find("option[selected]").first();
+      b.set(name, sel.attr("value") ?? $e.find("option").first().attr("value") ?? "");
+      return;
+    }
+    b.set(name, $e.attr("value") ?? "");
+  });
+  return b;
+}
+
+async function postAjax(
+  jar: HostCookieJar,
+  action: string,
+  referer: string,
+  body: URLSearchParams,
+): Promise<string> {
+  const r = await portalFetch(jar, action, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "Faces-Request": "partial/ajax",
+      "X-Requested-With": "XMLHttpRequest",
+      Origin: new URL(action).origin,
+      Referer: referer,
+    },
+    body: body.toString(),
+  });
+  return r.res.text();
+}
+
+/**
+ * シラバス照会で科目名検索し、先頭ヒットの詳細ページ HTML を返す。ヒット無しは null。
+ *
+ * WHY: Kmh006 は **stateful JSF** (実 ViewState)。検索は PrimeFaces partial-ajax で
+ * funcForm を更新し、詳細クリックは「検索後の更新 funcForm 全状態 + 新 ViewState」を
+ * 再送する必要がある (UNIPA はステートレスではなく、毎リクエストで全状態を要求)。
+ * 詳細レスポンスは ViewRoot 全体の再描画なので、その HTML を返す。
+ *
+ * ⚠️ production 配線時は SCRAPE_ENABLED ゲート下でのみ呼ぶこと。
+ */
+export async function fetchCitSyllabusHtml(
+  username: string,
+  password: string,
+  totpSecret: string,
+  totpDeviceName: string | null,
+  courseName: string,
+): Promise<string | null> {
+  const baseUrl = (process.env.CIT_PORTAL_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, "");
+  if (!username || !password || !totpSecret) {
+    throw new CitPortalError("認証情報が空です", "config");
+  }
+  if (!courseName.trim()) return null;
+
+  const jar: HostCookieJar = new Map();
+  const loginHtml = await login(jar, baseUrl, username, password, totpSecret, totpDeviceName);
+  const formHtml = await navigateMenuById(jar, baseUrl, loginHtml, SYLLABUS_MENU_ID);
+
+  const $0 = cheerio.load(formHtml);
+  const $form0 = $0('form[id$="funcForm"], form#funcForm').first();
+  if ($form0.length === 0) {
+    throw new CitPortalError("シラバス検索フォームが見つかりません", "fetch");
+  }
+  const action = new URL(
+    $form0.attr("action") || `${baseUrl}${TIMETABLE_PATH}`,
+    baseUrl,
+  ).toString();
+
+  // 1) 科目名で検索 (partial-ajax)
+  const sb = collectFormFields($0, $form0);
+  sb.set("funcForm:jugyoKamoku", courseName);
+  sb.set("javax.faces.partial.ajax", "true");
+  sb.set("javax.faces.source", "funcForm:search");
+  sb.set("javax.faces.partial.execute", "funcForm");
+  sb.set("javax.faces.partial.render", "funcForm");
+  sb.set("funcForm:search", "funcForm:search");
+  const searchXml = await postAjax(jar, action, formHtml, sb);
+
+  const funcHtml = extractPartialUpdate(searchXml, "funcForm");
+  const viewState = extractPartialViewState(searchXml);
+  if (!funcHtml) return null;
+
+  const $1 = cheerio.load(`<form id="funcForm">${funcHtml}</form>`);
+  const $form1 = $1("#funcForm");
+  // 先頭ヒットの詳細リンク (無ければ 0 件)
+  if ($1('a[id^="funcForm:table:0:"][id$="jugyoKmkName"]').length === 0) return null;
+
+  // 2) 検索後の全状態 + 新 ViewState で詳細クリック
+  const cb = collectFormFields($1, $form1);
+  if (viewState) cb.set("javax.faces.ViewState", viewState);
+  cb.set("javax.faces.partial.ajax", "true");
+  cb.set("javax.faces.source", "funcForm:table:0:jugyoKmkName");
+  cb.set("javax.faces.partial.execute", "@all");
+  cb.set("javax.faces.partial.render", "@all");
+  cb.set("funcForm:table:0:jugyoKmkName", "funcForm:table:0:jugyoKmkName");
+  const detailXml = await postAjax(jar, action, formHtml, cb);
+
+  if (detailXml.includes("Error Page")) {
+    throw new CitPortalError("シラバス詳細取得でエラーページが返りました", "fetch");
+  }
+  // 詳細は ViewRoot 全体の再描画。その HTML を返す。
+  return extractPartialUpdate(detailXml, "javax.faces.ViewRoot") ?? detailXml;
+}
