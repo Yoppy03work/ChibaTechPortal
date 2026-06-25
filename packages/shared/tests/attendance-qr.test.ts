@@ -27,6 +27,15 @@ describe('parseAttendanceQrUrl', () => {
     expect(result).toEqual({ ok: true, roomId: 'A-101' });
   });
 
+  it('chibatech.ac.jp ドメイン(改称後の現行 native 出席QR)を許可する', () => {
+    // WHY: CIT は it-chiba.ac.jp → chibatech.ac.jp に改称。実機の native 出席QRは
+    // attendance.is.chibatech.ac.jp/attendance/class_room/{roomId} 形式。
+    const result = parseAttendanceQrUrl(
+      'https://attendance.is.chibatech.ac.jp/attendance/class_room/731'
+    );
+    expect(result).toEqual({ ok: true, roomId: '731' });
+  });
+
   it('http (TLS なし) は拒否する', () => {
     // WHY: 校内 Wi-Fi であっても http は MITM で改竄され得る
     const result = parseAttendanceQrUrl(
