@@ -20,7 +20,14 @@ import { z } from 'zod';
  * 受理しない。サブドメインを許容するため endsWith 判定にする。
  * 環境変数で本番ホストを上書きできる (テスト用に `localhost` 等を許可する用途)。
  */
-const DEFAULT_ALLOWED_QR_HOST_SUFFIXES = ['.cit.ac.jp', '.it-chiba.ac.jp'];
+// WHY: CIT は it-chiba.ac.jp → chibatech.ac.jp にドメイン改称。現行の出席システムは
+// attendance.is.chibatech.ac.jp(旧 it-chiba と同一サーバ)なので chibatech.ac.jp が必須。
+// 旧 it-chiba.ac.jp も当面有効なため後方互換で残す。
+const DEFAULT_ALLOWED_QR_HOST_SUFFIXES = [
+  '.cit.ac.jp',
+  '.chibatech.ac.jp',
+  '.it-chiba.ac.jp',
+];
 
 function getAllowedHostSuffixes(): string[] {
   if (typeof process === 'undefined') return DEFAULT_ALLOWED_QR_HOST_SUFFIXES;

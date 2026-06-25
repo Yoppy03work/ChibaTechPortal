@@ -11,8 +11,10 @@ import { ScraperLoginError, ScraperError } from '@chibatech/shared';
 
 // WHY: 既定は本番 CIT 出席システム。ローカル検証で stub サーバへ向けたい場合のみ
 // ATTENDANCE_BASE_URL で上書きする（production は未設定 → 既定のまま）。
+// 2026-06-25 実機確認: attendance.is.chibatech.ac.jp と旧 attendance.is.it-chiba.ac.jp は
+// 同一サーバ(10.64.40.1)。CIT 改称後の現行ドメイン chibatech.ac.jp を既定にする。
 const BASE_URL =
-  process.env.ATTENDANCE_BASE_URL ?? 'https://attendance.is.it-chiba.ac.jp';
+  process.env.ATTENDANCE_BASE_URL ?? 'https://attendance.is.chibatech.ac.jp';
 const LOGIN_URL = `${BASE_URL}/attendance/login`;
 const TOP_URL = `${BASE_URL}/attendance/top`;
 
