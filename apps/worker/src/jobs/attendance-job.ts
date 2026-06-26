@@ -109,9 +109,13 @@ export async function processAttendanceJob(
   const now = new Date();
   // WHY: payload で classDate が来ていればそれを優先 (confirm モードの replay
   // protection)。未指定 (旧 auto Scheduler 経路) は実行時刻ベース。
+  // @db.Date は JST カレンダー日 を表す。`new Date('YYYY-MM-DD')` は UTC midnight に
+  // なり Prisma が同じ暦日で永続化する(qr-validate と同規約)。host TZ 依存の
+  // toClassDate(setHours) を使うと TZ=Asia/Tokyo のコンテナで前日にズレ、unique key
+  // (userId,timetableId,classDate,method)/dedup が producer(web) とズレるため使わない。
   const classDate = parsed.data.classDate
-    ? toClassDate(new Date(parsed.data.classDate))
-    : toClassDate(now);
+    ? new Date(parsed.data.classDate)
+    : new Date(formatJstYmd(now));
   // WHY: confirm guard の classDate 一致判定は host TZ 非依存の JST `YYYY-MM-DD`
   // 文字列で行う。toClassDate(Date) は setHours で host TZ truncate するため
   // guard には渡さず、payload 由来の日 (無ければ now) を formatJstYmd で JST 日に
@@ -696,7 +700,8 @@ async function saveLog(
   status: string,
   method: AttendanceMode,
   errorDetail: string | null = null,
-  classDate = toClassDate(new Date())
+  // 既定も host TZ 非依存に: JST 暦日 → UTC midnight (@db.Date 規約)。
+  classDate = new Date(formatJstYmd(new Date()))
 ) {
   // WHY: success は terminal な監査記録。重複/リトライジョブが (alreadySubmitted で
   // pre-network reject されたケースなど) skipped/failed を書き戻すと、既存の
@@ -742,12 +747,6 @@ async function saveLog(
       },
     });
   }
-}
-
-function toClassDate(date: Date): Date {
-  const classDate = new Date(date);
-  classDate.setHours(0, 0, 0, 0);
-  return classDate;
 }
 
 async function notifyUser(userId: string, className: string, success: boolean, message: string) {
