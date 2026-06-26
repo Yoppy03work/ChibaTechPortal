@@ -891,6 +891,7 @@ async function navigateMenuById(
   baseUrl: string,
   currentHtml: string,
   menuid: string,
+  viewStateOverride?: string | null,
 ): Promise<string> {
   const $ = cheerio.load(currentHtml);
   const $menu = $('form#menuForm, form[id$=":menuForm"]').first();
@@ -905,6 +906,9 @@ async function navigateMenuById(
   ).toString();
   const body = new URLSearchParams();
   for (const [k, v] of Object.entries(fields)) body.set(k, v);
+  // WHY: partial-ajax(検索/詳細)後は ViewState が進む。menuForm に埋まった ViewState は
+  // その描画時点のもの(陳腐化し得る)なので、直近レスポンスの最新 ViewState で上書きする。
+  if (viewStateOverride) body.set("javax.faces.ViewState", viewStateOverride);
   body.set("menuForm", "menuForm");
   body.set("rx.sync.source", "menuForm:mainMenu");
   body.set("menuForm:mainMenu", "menuForm:mainMenu");
@@ -1051,6 +1055,92 @@ export async function fetchCitSyllabusHtml(
   const jar: HostCookieJar = new Map();
   const loginHtml = await login(jar, baseUrl, username, password, totpSecret, totpDeviceName);
   const formHtml = await navigateMenuById(jar, baseUrl, loginHtml, SYLLABUS_MENU_ID);
+  return (await searchSyllabusDetail(jar, baseUrl, formHtml, courseName)).html;
+}
+
+/**
+ * 複数科目のシラバス詳細を **1 回のログイン** でまとめて取得する (sync 用)。
+ *
+ * WHY: 科目ごとに login() し直すと、同一 30s 窓で同じ TOTP コードを再送して IdP に
+ * replay 拒否される。よってセッション(jar)を 1 ログイン分だけ張り、科目ごとに menu から
+ * 検索フォームへ再ナビしてフレッシュな funcForm 状態で検索する。
+ *
+ * ナビ元には「直近に完全レンダリングされたページ」(検索フォーム or 詳細 ViewRoot)を使う。
+ * これらは現行 menuForm(有効 ViewState)を含むので、ループでも ViewState が陳腐化しない。
+ *
+ * 返り値: ユニーク化した科目名ごとの [{ courseName, html|null }] (html=null はヒット無し/失敗)。
+ * 1 科目の失敗で全体を止めない (fail-soft)。
+ *
+ * ⚠️ production 配線時は SCRAPE_ENABLED ゲート下でのみ呼ぶこと。
+ */
+export async function fetchCitSyllabiForCourses(
+  username: string,
+  password: string,
+  totpSecret: string,
+  totpDeviceName: string | null,
+  courseNames: string[],
+): Promise<Array<{ courseName: string; html: string | null }>> {
+  const baseUrl = (process.env.CIT_PORTAL_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, "");
+  if (!username || !password || !totpSecret) {
+    throw new CitPortalError("認証情報が空です", "config");
+  }
+  const uniq = [...new Set(courseNames.map((c) => c.trim()).filter(Boolean))];
+  const results: Array<{ courseName: string; html: string | null }> = [];
+  if (uniq.length === 0) return results;
+
+  const jar: HostCookieJar = new Map();
+  const loginHtml = await login(jar, baseUrl, username, password, totpSecret, totpDeviceName);
+  // WHY: menuForm の構造(メニューツリー)は不変なので毎回 loginHtml から読む。一方 ViewState は
+  // 検索/詳細で進むため、直近レスポンスの最新 ViewState(latestViewState)を menu nav に引き継ぐ。
+  // 初回は null = loginHtml 埋め込みの ViewState(ログイン直後で有効)を使う。
+  let latestViewState: string | null = null;
+  for (const courseName of uniq) {
+    try {
+      const formHtml = await navigateMenuById(
+        jar,
+        baseUrl,
+        loginHtml,
+        SYLLABUS_MENU_ID,
+        latestViewState,
+      );
+      const { html, viewState } = await searchSyllabusDetail(
+        jar,
+        baseUrl,
+        formHtml,
+        courseName,
+      );
+      results.push({ courseName, html });
+      // ヒット無しでも検索レスポンスで ViewState は進むので、取れた最新を必ず引き継ぐ。
+      if (viewState) latestViewState = viewState;
+    } catch (error) {
+      // WHY: 1 科目のネットワーク/JSF エラーで全体を落とさない。null で記録し継続。
+      console.warn(
+        `[cit-syllabus] 科目のシラバス取得に失敗 (継続): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      results.push({ courseName, html: null });
+    }
+  }
+  return results;
+}
+
+/**
+ * ログイン済み jar + 検索フォーム HTML で科目名検索 → 先頭ヒットの詳細を取得する。
+ * 返り値: { html, viewState }。html はヒット無し時 null、viewState は直近レスポンスの
+ * 最新 ViewState(無ければ null)。検索フォームへの(再)ナビは呼び出し側が行う。
+ *
+ * WHY: Kmh006 は stateful JSF。検索は partial-ajax で funcForm を更新し、詳細クリックは
+ * 「検索後の更新 funcForm 全状態 + 新 ViewState」を再送する必要がある。詳細は ViewRoot
+ * 全体の再描画。最新 ViewState は呼び出し側が次の menu nav に引き継ぐため返す。
+ */
+async function searchSyllabusDetail(
+  jar: HostCookieJar,
+  baseUrl: string,
+  formHtml: string,
+  courseName: string,
+): Promise<{ html: string | null; viewState: string | null }> {
+  if (!courseName.trim()) return { html: null, viewState: null };
 
   const $0 = cheerio.load(formHtml);
   const $form0 = $0('form[id$="funcForm"], form#funcForm').first();
@@ -1073,17 +1163,19 @@ export async function fetchCitSyllabusHtml(
   const searchXml = await postAjax(jar, action, formHtml, sb);
 
   const funcHtml = extractPartialUpdate(searchXml, "funcForm");
-  const viewState = extractPartialViewState(searchXml);
-  if (!funcHtml) return null;
+  const searchViewState = extractPartialViewState(searchXml);
+  if (!funcHtml) return { html: null, viewState: searchViewState };
 
   const $1 = cheerio.load(`<form id="funcForm">${funcHtml}</form>`);
   const $form1 = $1("#funcForm");
   // 先頭ヒットの詳細リンク (無ければ 0 件)
-  if ($1('a[id^="funcForm:table:0:"][id$="jugyoKmkName"]').length === 0) return null;
+  if ($1('a[id^="funcForm:table:0:"][id$="jugyoKmkName"]').length === 0) {
+    return { html: null, viewState: searchViewState };
+  }
 
   // 2) 検索後の全状態 + 新 ViewState で詳細クリック
   const cb = collectFormFields($1, $form1);
-  if (viewState) cb.set("javax.faces.ViewState", viewState);
+  if (searchViewState) cb.set("javax.faces.ViewState", searchViewState);
   cb.set("javax.faces.partial.ajax", "true");
   cb.set("javax.faces.source", "funcForm:table:0:jugyoKmkName");
   cb.set("javax.faces.partial.execute", "@all");
@@ -1094,6 +1186,8 @@ export async function fetchCitSyllabusHtml(
   if (detailXml.includes("Error Page")) {
     throw new CitPortalError("シラバス詳細取得でエラーページが返りました", "fetch");
   }
-  // 詳細は ViewRoot 全体の再描画。その HTML を返す。
-  return extractPartialUpdate(detailXml, "javax.faces.ViewRoot") ?? detailXml;
+  // 詳細は ViewRoot 全体の再描画。最新 ViewState は別 update ノードで届くのでそれを返す。
+  const detailViewState = extractPartialViewState(detailXml) ?? searchViewState;
+  const html = extractPartialUpdate(detailXml, "javax.faces.ViewRoot") ?? detailXml;
+  return { html, viewState: detailViewState };
 }

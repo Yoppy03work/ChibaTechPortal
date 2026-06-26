@@ -12,6 +12,7 @@ function panel(label: string, body: string): string {
   return `<div class="ui-panel"><div class="ui-panel-titlebar ui-widget-header">${label}</div><div class="ui-panel-content">${body}</div></div>`;
 }
 const SAMPLE = `<div>
+  <table><tr><th>開講年度学期</th><td>2026年度前期</td></tr></table>
   ${panel('科目名', 'オペレーティングシステム')}
   ${panel('英語名', 'Operating Systems')}
   ${panel('科目担当者', '前川 仁孝')}
@@ -41,6 +42,29 @@ describe('parseCitSyllabusDetail', () => {
     expect(s.dayPeriod).toBe('月曜6限、月曜7限');
     expect(s.semester).toBe('5S');
     expect(s.numbering).toBe('専8305');
+  });
+
+  it('開講年度学期から academicYear/semesterTerm を取り出す', () => {
+    expect(s.academicYear).toBe(2026);
+    expect(s.semesterTerm).toBe('前期');
+  });
+
+  it('複数年度が混在しても「週間授業」見出し付近の開講年度を優先する', () => {
+    // 備考に過去年度の参照、開講年度は週間授業見出しに出る実機構造を模す
+    const html = `<div>
+      ${panel('注意事項', '2020年度後期に開講した内容を踏襲する。')}
+      <h3>週間授業 2026年度前期</h3>
+      ${panel('1週', 'x')}
+    </div>`;
+    const r = parseCitSyllabusDetail(html);
+    expect(r.academicYear).toBe(2026);
+    expect(r.semesterTerm).toBe('前期');
+  });
+
+  it('YYYY年度<学期> が無ければ academicYear/semesterTerm は null (呼び出し側で補完)', () => {
+    const r = parseCitSyllabusDetail(`<div>${panel('科目名', 'X')}</div>`);
+    expect(r.academicYear).toBeNull();
+    expect(r.semesterTerm).toBeNull();
   });
 
   it('授業の目的 + 到達目標 を objectives に結合する', () => {

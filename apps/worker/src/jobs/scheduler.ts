@@ -19,15 +19,19 @@ import { isAutoExecutionEnabled, isUserAllowlisted } from '../lib/attendance-rol
 import {
   isCitTimetableSyncEnabled,
   isCitNotificationsSyncEnabled,
+  isCitSyllabusSyncEnabled,
 } from '../lib/cit-portal-env';
 import { runCitTimetableSync } from '../services/cit-timetable-sync';
 import { runCitNotificationsSync } from '../services/cit-notifications-sync';
+import { runCitSyllabusSync } from '../services/cit-syllabus-sync';
 
 const SCRAPE_INTERVAL_MS = 15 * 60 * 1000; // 15分
 // WHY: 時間割は学期単位の低頻度変更。SSO ログインも重いので 1 日間隔で十分。
 const CIT_TIMETABLE_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 1日
 // WHY: 掲示板お知らせは時間割より動くが、SSO ログインが重いので 1 時間間隔。
 const CIT_NOTIFICATIONS_SYNC_INTERVAL_MS = 60 * 60 * 1000; // 1時間
+// WHY: シラバスは学期中ほぼ不変。SSO + 科目数分の検索で重いので 1 日間隔で十分。
+const CIT_SYLLABUS_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 1日
 const ATTENDANCE_CHECK_INTERVAL_MS = 60 * 1000; // 1分（授業時間チェック）
 const JITTER_MAX_MS = 3 * 60 * 1000; // ±3分
 
@@ -302,6 +306,22 @@ export function startScheduler() {
     console.log('[scheduler] CIT notifications sync disabled');
   }
 
+  // CIT シラバスの SSO 自動同期。同上 env ゲート (CIT_SYLLABUS_SYNC_ENABLED)。起動時 + 1日間隔。
+  let citSyllabusSyncInterval: ReturnType<typeof setInterval> | undefined;
+  if (isCitSyllabusSyncEnabled()) {
+    const runSyllabus = () =>
+      runCitSyllabusSync().catch((err) =>
+        console.error(
+          '[scheduler] CIT syllabus sync failed:',
+          err instanceof Error ? err.message : err
+        )
+      );
+    runSyllabus();
+    citSyllabusSyncInterval = setInterval(runSyllabus, CIT_SYLLABUS_SYNC_INTERVAL_MS);
+  } else {
+    console.log('[scheduler] CIT syllabus sync disabled');
+  }
+
   // 出席: 1分間隔で授業時間チェック + confirm リマインダ
   const attendanceInterval = setInterval(() => {
     enqueueAttendanceJobs().catch((err) => {
@@ -316,6 +336,7 @@ export function startScheduler() {
     scrapeInterval,
     citTimetableSyncInterval,
     citNotificationsSyncInterval,
+    citSyllabusSyncInterval,
     attendanceInterval,
   };
 }
