@@ -1,25 +1,45 @@
 /**
  * 出席システム HTTPアダプタ
  *
- * WHY: 2026-03-23 CIT_Wi-Fiでの実測に基づく実装。
- * QRコードURL = /attendance/class_room/{教室名}
- * ログイン: _csrf + username + password + keeplogin
- * auth_hash cookie: 120日有効 → セッション再利用で毎回ログイン不要
+ * WHY: 2026-06-26 CIT 内部網での実機検証で確定した本物のフロー。
+ *   ① POST /attendance/login  (_csrf+username+password、**Referer/Origin 必須**・keeplogin 送らない)
+ *      → 302 /attendance/top。Referer/Origin 無し or keeplogin=on だと 200 でログイン画面に
+ *        再描画され無音失敗するため、ヘッダを必ず付ける。
+ *   ② GET  /attendance/class_room/{roomId} → 出席確認画面 (その教室の現授業)
+ *   ③ POST /attendance/attend (_csrf のみ) → 「出席済みにしました」
+ *
+ * ホスト: TLS 証明書は `attendance.is.it-chiba.ac.jp` 用 (旧ドメイン)。新ドメイン
+ *   `chibatech.ac.jp` は同一サーバ(10.64.40.1)だが cert altname 不一致で Node fetch が
+ *   ERR_TLS_CERT_ALTNAME_INVALID で失敗するため、既定は it-chiba を使う。
+ * creds: ポータル SSO と同じ学籍番号+パスワード (出席システムは SSO でなくローカルフォーム)。
+ *
+ * 状態判定は always-present なモーダルテンプレ (completeModal/errorModal) ではなく、
+ * 状態依存のテキスト (「出席済みにしました」「出席で登録する」「出席できる授業はありません」)
+ * で行う (実機検証済み)。
  */
+import * as cheerio from 'cheerio';
 import type { AttendanceResult, AttendanceAdapter } from '@chibatech/shared';
 import { ScraperLoginError, ScraperError } from '@chibatech/shared';
 
-// WHY: 既定は本番 CIT 出席システム。ローカル検証で stub サーバへ向けたい場合のみ
-// ATTENDANCE_BASE_URL で上書きする（production は未設定 → 既定のまま）。
-// 2026-06-25 実機確認: attendance.is.chibatech.ac.jp と旧 attendance.is.it-chiba.ac.jp は
-// 同一サーバ(10.64.40.1)。CIT 改称後の現行ドメイン chibatech.ac.jp を既定にする。
+// WHY: 既定は本番 CIT 出席システム (cert 有効な it-chiba ホスト)。ローカル検証で stub へ
+// 向けたい場合のみ ATTENDANCE_BASE_URL で上書きする (production は未設定 → 既定のまま)。
 const BASE_URL =
-  process.env.ATTENDANCE_BASE_URL ?? 'https://attendance.is.chibatech.ac.jp';
+  process.env.ATTENDANCE_BASE_URL ?? 'https://attendance.is.it-chiba.ac.jp';
+const ORIGIN = (() => {
+  try {
+    return new URL(BASE_URL).origin;
+  } catch {
+    return BASE_URL;
+  }
+})();
 const LOGIN_URL = `${BASE_URL}/attendance/login`;
-const TOP_URL = `${BASE_URL}/attendance/top`;
+const ATTEND_URL = `${BASE_URL}/attendance/attend`;
+const classRoomUrl = (roomId: string) =>
+  `${BASE_URL}/attendance/class_room/${encodeURIComponent(roomId)}`;
 
 const USER_AGENT =
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15';
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+const TIMEOUT_MS = 10000;
 
 function extractCookies(headers: Headers): Record<string, string> {
   const cookies: Record<string, string> = {};
@@ -37,116 +57,75 @@ function extractCookies(headers: Headers): Record<string, string> {
 }
 
 function cookieHeader(cookies: Record<string, string>): string {
-  return Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+  return Object.entries(cookies)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
+}
+
+/**
+ * _csrf を取り出す。formActionContains を指定すると、その action を持つフォーム内の
+ * _csrf を優先する (class_room ページには logout と attend の 2 フォームがあり、
+ * ページ全体の最初の _csrf だと logout 側を拾い得るため)。
+ */
+function extractCsrf(html: string, formActionContains?: string): string | null {
+  const $ = cheerio.load(html);
+  if (formActionContains) {
+    const $form = $('form')
+      .filter((_, f) => ($(f).attr('action') || '').includes(formActionContains))
+      .first();
+    const scoped = $form.find('input[name="_csrf"]').attr('value');
+    if (scoped) return scoped;
+  }
+  return $('input[name="_csrf"]').first().attr('value') ?? null;
+}
+
+/** モーダル/alert から実エラーメッセージを抽出 (テンプレ既定値しか無ければ null)。 */
+function extractErrorMessage(html: string): string | null {
+  const $ = cheerio.load(html);
+  for (const sel of ['#errorModal .modal-body', '#errorModal', '.alert-danger', '.alert']) {
+    const t = $(sel).text().replace(/\s+/g, ' ').trim();
+    if (t && t.length <= 200) return t;
+  }
+  return null;
 }
 
 export class AttendanceHttpAdapter implements AttendanceAdapter {
   readonly name = 'http';
 
-  /**
-   * フルログインフローで出席する
-   *
-   * 1. GET /attendance/class_room/{roomId} → 302 → /login (JSESSIONID取得)
-   * 2. GET /attendance/login → _csrf取得
-   * 3. POST /attendance/login → 302 → /top (auth_hash取得)
-   * 4. GET /attendance/top → HTML解析で結果判定
-   */
-  async attend(userId: string, password: string, roomId: string): Promise<AttendanceResult> {
+  /** ログイン → class_room → attend のフルフローで出席する。 */
+  async attend(
+    userId: string,
+    password: string,
+    roomId: string,
+  ): Promise<AttendanceResult> {
     try {
-      let cookies: Record<string, string> = {};
-
-      // Step 1: 教室URLアクセス → JSESSIONID取得
-      const classRoomUrl = `${BASE_URL}/attendance/class_room/${roomId}`;
-      const step1 = await fetch(classRoomUrl, {
-        redirect: 'manual',
-        headers: { 'User-Agent': USER_AGENT },
-        signal: AbortSignal.timeout(10000),
-      });
-      cookies = { ...cookies, ...extractCookies(step1.headers) };
-
-      // Step 2: ログインページ → _csrf取得
-      const step2 = await fetch(LOGIN_URL, {
-        headers: {
-          'User-Agent': USER_AGENT,
-          Cookie: cookieHeader(cookies),
-        },
-        signal: AbortSignal.timeout(10000),
-      });
-      cookies = { ...cookies, ...extractCookies(step2.headers) };
-      const loginHtml = await step2.text();
-
-      const csrfMatch = loginHtml.match(/name="_csrf"\s+value="([^"]*)"/);
-      if (!csrfMatch) {
-        throw new ScraperLoginError('attendance', this.name, 'CSRF token not found');
-      }
-
-      // Step 3: ログインPOST
-      const step3 = await fetch(LOGIN_URL, {
-        method: 'POST',
-        redirect: 'manual',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': USER_AGENT,
-          Cookie: cookieHeader(cookies),
-        },
-        body: new URLSearchParams({
-          _csrf: csrfMatch[1]!,
-          username: userId,
-          password: password,
-          keeplogin: 'on',
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
-      cookies = { ...cookies, ...extractCookies(step3.headers) };
-
-      const location = step3.headers.get('location') || '';
-
-      // WHY: ログイン失敗時は /attendance/login にリダイレクトされる
-      if (step3.status === 302 && location.includes('/login')) {
-        throw new ScraperLoginError('attendance', this.name);
-      }
-
-      // Step 4: ログイン後ページ解析
-      return await this.parseTopPage(cookies);
+      const cookies = await this.login(userId, password);
+      return await this.attendInSession(cookies, roomId);
     } catch (error) {
       if (error instanceof ScraperError) throw error;
       throw new ScraperError('Attendance failed', 'attendance', this.name, error);
     }
   }
 
-  /**
-   * auth_hash cookieでセッション再利用して出席する（再ログイン不要）
-   * WHY: auth_hashは120日有効。毎回ログインする必要がない
-   */
-  async attendWithSession(cookies: Record<string, string>, roomId: string): Promise<AttendanceResult> {
+  /** 既存セッション cookie で出席する (再ログイン省略)。期限切れなら ScraperError。 */
+  async attendWithSession(
+    cookies: Record<string, string>,
+    roomId: string,
+  ): Promise<AttendanceResult> {
     try {
-      // auth_hashがあれば直接topページにアクセス可能
-      const resp = await fetch(TOP_URL, {
-        redirect: 'manual',
-        headers: {
-          'User-Agent': USER_AGENT,
-          Cookie: cookieHeader(cookies),
-        },
-        signal: AbortSignal.timeout(10000),
-      });
-
-      // WHY: セッション切れの場合はloginにリダイレクトされる
-      if (resp.status === 302) {
-        const location = resp.headers.get('location') || '';
-        if (location.includes('/login')) {
-          throw new ScraperError('Session expired', 'attendance', this.name);
-        }
-      }
-
-      const newCookies = { ...cookies, ...extractCookies(resp.headers) };
-      return await this.parseTopPage(newCookies);
+      return await this.attendInSession({ ...cookies }, roomId);
     } catch (error) {
       if (error instanceof ScraperError) throw error;
-      throw new ScraperError('Attendance with session failed', 'attendance', this.name, error);
+      throw new ScraperError(
+        'Attendance with session failed',
+        'attendance',
+        this.name,
+        error,
+      );
     }
   }
 
-  /** 出席システム到達性チェック */
+  /** 出席システム到達性チェック。 */
   async healthCheck(): Promise<boolean> {
     try {
       const resp = await fetch(`${BASE_URL}/attendance/`, {
@@ -161,42 +140,80 @@ export class AttendanceHttpAdapter implements AttendanceAdapter {
   }
 
   /**
-   * /attendance/top のHTMLを解析して出席結果を判定する
+   * ローカルフォームでログインしてセッション cookie を返す。
+   * 成功は 302 → /top。失敗 (creds 不正/ヘッダ不足) は 200 でログイン画面に再描画される
+   * (または 302 → /login) ので、いずれも ScraperLoginError にする。
    */
-  private async parseTopPage(cookies: Record<string, string>): Promise<AttendanceResult> {
-    const resp = await fetch(TOP_URL, {
+  private async login(
+    userId: string,
+    password: string,
+  ): Promise<Record<string, string>> {
+    let cookies: Record<string, string> = {};
+
+    const getResp = await fetch(LOGIN_URL, {
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    cookies = { ...cookies, ...extractCookies(getResp.headers) };
+    const csrf = extractCsrf(await getResp.text());
+    if (!csrf) {
+      throw new ScraperLoginError('attendance', this.name, 'CSRF token not found');
+    }
+
+    const postResp = await fetch(LOGIN_URL, {
+      method: 'POST',
+      redirect: 'manual',
       headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': USER_AGENT,
+        // WHY: Referer/Origin が無いと出席システムは 200 でログイン画面に戻し無音失敗する。
+        Origin: ORIGIN,
+        Referer: LOGIN_URL,
         Cookie: cookieHeader(cookies),
       },
-      signal: AbortSignal.timeout(10000),
+      // WHY: keeplogin は送らない (送ると検証時に認証が通らなかった)。
+      body: new URLSearchParams({ _csrf: csrf, username: userId, password }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
+    cookies = { ...cookies, ...extractCookies(postResp.headers) };
 
-    const html = await resp.text();
-
-    // WHY: 実測で判明した判定ロジック
-    // 成功: #completeModal が存在する
-    if (html.includes('completeModal')) {
-      return {
-        success: true,
-        message: '出席完了',
-        classDate: new Date(),
-      };
+    const location = postResp.headers.get('location') || '';
+    if (postResp.status !== 302 || location.includes('/login')) {
+      // 200 再描画 or /login へのリダイレクト = 認証失敗。
+      throw new ScraperLoginError('attendance', this.name);
     }
+    return cookies;
+  }
 
-    // エラー: #errorModal が存在する
-    if (html.includes('errorModal')) {
-      // エラーメッセージを抽出（モーダル内のテキスト）
-      const errorMatch = html.match(/id="errorModal"[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/);
-      const errorMsg = errorMatch?.[1]?.replace(/<[^>]*>/g, '').trim() || '出席エラー';
-      return {
-        success: false,
-        message: errorMsg,
-        classDate: new Date(),
-      };
+  /**
+   * セッション cookie で class_room → /attendance/attend を実行する。
+   */
+  private async attendInSession(
+    cookies: Record<string, string>,
+    roomId: string,
+  ): Promise<AttendanceResult> {
+    const crUrl = classRoomUrl(roomId);
+    const cr = await fetch(crUrl, {
+      redirect: 'follow',
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'text/html',
+        Cookie: cookieHeader(cookies),
+      },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    Object.assign(cookies, extractCookies(cr.headers));
+    const finalUrl = cr.url || crUrl;
+    if (finalUrl.includes('/login')) {
+      throw new ScraperError('Session expired', 'attendance', this.name);
     }
+    const html = await cr.text();
 
-    // 授業なし: .alert_message に「出席できる授業はありません」
+    // 既に出席済み
+    if (html.includes('出席済みにしました')) {
+      return { success: true, message: '出席済み', classDate: new Date() };
+    }
+    // 出席可能な授業なし
     if (html.includes('出席できる授業はありません')) {
       return {
         success: false,
@@ -204,61 +221,64 @@ export class AttendanceHttpAdapter implements AttendanceAdapter {
         classDate: new Date(),
       };
     }
-
-    // WHY: 上記以外は出席フォームが表示されている状態。フォームをsubmitする必要がある
-    // 出席フォームのCSRFトークンを取得してsubmit
-    const csrfMatch = html.match(/name="_csrf"\s+value="([^"]*)"/);
-    if (csrfMatch && html.includes('id="attend"')) {
-      return await this.submitAttendance(cookies, csrfMatch[1]!);
+    // 出席確認画面 (登録ボタンあり) → /attendance/attend へ submit
+    const hasAttendForm = /action="[^"]*\/attendance\/attend/.test(html);
+    if (html.includes('出席で登録する') && hasAttendForm) {
+      const csrf = extractCsrf(html, '/attendance/attend');
+      if (!csrf) {
+        return {
+          success: false,
+          message: '出席フォームの CSRF を取得できませんでした',
+          classDate: new Date(),
+        };
+      }
+      return await this.submitAttend(cookies, csrf, finalUrl);
     }
 
+    // 想定外: エラーメッセージがあればそれを、無ければ判定不能
+    const err = extractErrorMessage(html);
     return {
       success: false,
-      message: '出席状態を判定できませんでした',
+      message: err || '出席状態を判定できませんでした',
       classDate: new Date(),
     };
   }
 
-  /**
-   * 出席フォームをsubmitする
-   */
-  private async submitAttendance(cookies: Record<string, string>, csrf: string): Promise<AttendanceResult> {
-    // WHY: 実測でform actionは /attendance/top にPOST
-    const resp = await fetch(TOP_URL, {
+  /** /attendance/attend に _csrf を POST して結果を判定する。 */
+  private async submitAttend(
+    cookies: Record<string, string>,
+    csrf: string,
+    referer: string,
+  ): Promise<AttendanceResult> {
+    const resp = await fetch(ATTEND_URL, {
       method: 'POST',
       redirect: 'follow',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': USER_AGENT,
+        Origin: ORIGIN,
+        Referer: referer,
         Cookie: cookieHeader(cookies),
       },
       body: new URLSearchParams({ _csrf: csrf }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-
     const html = await resp.text();
 
-    if (html.includes('completeModal')) {
-      return {
-        success: true,
-        message: '出席完了',
-        classDate: new Date(),
-      };
+    if (/出席済みにしました|出席を登録しました|出席しました/.test(html)) {
+      return { success: true, message: '出席完了', classDate: new Date() };
     }
-
-    if (html.includes('errorModal')) {
-      const errorMatch = html.match(/id="errorModal"[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/);
-      const errorMsg = errorMatch?.[1]?.replace(/<[^>]*>/g, '').trim() || '出席登録エラー';
+    if (html.includes('出席できる授業はありません')) {
       return {
         success: false,
-        message: errorMsg,
+        message: '現在、出席できる授業はありません',
         classDate: new Date(),
       };
     }
-
+    const err = extractErrorMessage(html);
     return {
       success: false,
-      message: '出席登録の結果を判定できませんでした',
+      message: err || '出席登録の結果を判定できませんでした',
       classDate: new Date(),
     };
   }
