@@ -209,6 +209,9 @@ model Syllabus {
 
   timetableEntries Timetable[]
 
+  // WHY: シラバス同期は (年度, 科目名) を自然キーに upsert する。read-then-write の
+  // 競合で重複行が生まれないよう DB レベルの一意制約をバックストップにする。
+  @@unique([academicYear, courseName], name: "academicYear_courseName")
   @@map("syllabi")
 }
 

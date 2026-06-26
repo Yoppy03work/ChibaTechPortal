@@ -26,6 +26,11 @@ async function shutdown() {
   console.log('Shutting down workers...');
   clearInterval(scheduler.scrapeInterval);
   clearInterval(scheduler.attendanceInterval);
+  // WHY: CIT SSO 同期インターバルも停止する (未クリアだと shutdown 後も発火し得る)。
+  // 無効時は undefined だが clearInterval(undefined) は no-op で安全。
+  clearInterval(scheduler.citTimetableSyncInterval);
+  clearInterval(scheduler.citNotificationsSyncInterval);
+  clearInterval(scheduler.citSyllabusSyncInterval);
   await scrapeWorker.close();
   await notifyWorker.close();
   await attendanceWorker.close();

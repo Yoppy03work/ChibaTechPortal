@@ -70,3 +70,13 @@ export function isCitNotificationsSyncEnabled(): boolean {
   if (process.env.CIT_NOTIFICATIONS_SYNC_ENABLED !== 'true') return false;
   return getCitPortalSyncConfig() !== null;
 }
+
+/**
+ * CIT シラバス照会(Kmh006)の SSO 自動同期が有効か。SCRAPE_ENABLED + 専用フラグ
+ * CIT_SYLLABUS_SYNC_ENABLED + creds 揃い のすべてで true (fail-closed)。
+ */
+export function isCitSyllabusSyncEnabled(): boolean {
+  if (process.env.SCRAPE_ENABLED !== 'true') return false;
+  if (process.env.CIT_SYLLABUS_SYNC_ENABLED !== 'true') return false;
+  return getCitPortalSyncConfig() !== null;
+}
