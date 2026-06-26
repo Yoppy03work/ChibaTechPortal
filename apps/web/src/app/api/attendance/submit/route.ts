@@ -103,8 +103,10 @@ export async function POST(request: Request) {
       where: {
         userId,
         timetableId,
-        // WHY: classDate は @db.Date のため、time 部分を 0:00 に揃えて比較
-        classDate: toClassDate(classDateObj),
+        // WHY: classDate は @db.Date。`new Date('YYYY-MM-DD')`(classDateObj) は UTC
+        // midnight で、worker が永続化する値と同規約。host TZ 依存の toClassDate は
+        // 使わない (TZ=Asia/Tokyo で前日にズレ、dedup が worker とミスマッチするため)。
+        classDate: classDateObj,
         status: 'success',
       },
       select: { id: true },
@@ -170,12 +172,11 @@ export async function POST(request: Request) {
   // セパレータは `-` を使う: BullMQ 内部キーは `bull:<queue>:<jobId>` の形で
   // `:` を区切りに使うため、custom jobId に `:` を混ぜると Redis キー解析の
   // 混乱を招く可能性がある (Codex 指摘)。
-  // WHY (consistency): jobId は existingSuccess 検索 / 監査ログ書き込みで使う
-  // `toClassDate(classDateObj)` と同じ Date を Y-M-D 化する。raw 文字列を
-  // slice したり別 TZ で正規化したりすると、同一カレンダー日 (DB 視点) でも
-  // jobId が分裂して BullMQ 重複防御をバイパスする (Codex 指摘)。
-  const classDateForKey = toClassDate(classDateObj);
-  const classDateYmd = formatYmdLocal(classDateForKey);
+  // WHY (consistency): jobId の日付は guard / dedup と同じ JST カレンダー日にする。
+  // zod 検証済みの raw `YYYY-MM-DD` (= classDateObj の UTC 暦日) をそのまま使う。
+  // host TZ 依存の formatYmdLocal(toClassDate(...)) を経由すると TZ=Asia/Tokyo で
+  // jobId が分裂し、BullMQ 重複防御をバイパスするため使わない。
+  const classDateYmd = parsed.data.classDate;
   const jobId = `confirm-${userId}-${timetableId}-${classDateYmd}`;
 
   await attendanceQueue.add(
@@ -210,20 +211,4 @@ export async function POST(request: Request) {
   );
 
   return NextResponse.json({ accepted: true, jobId }, { status: 202 });
-}
-
-function toClassDate(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-// WHY: toClassDate() の結果 (ローカル TZ 00:00) を `YYYY-MM-DD` に整形する。
-// DB query で使う Date と同じ抽出源を使うことで、jobId と
-// `existingSuccess`/`attendanceLog.classDate` のキャレンダー日を一致させる。
-function formatYmdLocal(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
 }
