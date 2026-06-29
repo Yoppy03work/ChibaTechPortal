@@ -18,10 +18,10 @@
  * 保守的 (不一致側に倒す)」方針の純粋関数を提供する。副作用なし・I/O なし・
  * env 非依存。Prisma/Next 非依存 (shared の他 util と同じ規約)。
  *
- * 重要: 本モジュールは現時点では **どの guard にも wire しない**。実 QR の
- * roomId フォーマット (数値コードなのか日本語なのか) が未確認のため、まず
- * pure util + test だけをマージし、実サンプル確認後に roomsMatch を guard へ
- * 差し込む。詳細は本タスクの integrationProposal を参照。
+ * 状態: attendanceRoomMatches は confirm-guard / auto-guard / attendance-job に wire 済み。
+ * 規則は実機検証 (2026-06-26, 津田沼 "731講義室" の QR roomId = "7301") で確証済み。
+ * 新習志野は 7 始まりでも native 4 桁 (ユーザー談) のため、畳み込みは一方向にして衝突を防ぐ
+ * (詳細は attendanceRoomMatches の doc)。
  */
 
 /**
@@ -189,34 +189,23 @@ export function roomsMatch(
  * 時間割 (UNIPA) の room と QR (出席システム) の roomId が同一教室かを判定する。
  *
  * WHY: 両者は表記体系が異なる。
- *   - UNIPA 時間割: 3 桁の教室コード + 種別 ("７３１講義室" → コア "731")
+ *   - UNIPA 時間割: 教室コード + 種別 ("７３１講義室" → コア "731")
  *   - 出席システム QR: /attendance/class_room/{roomId} の roomId ("7301")
- * CIT のローカル規則: 「3 桁の教室のうち 7 始まりの教室のみ、2 桁目と 3 桁目の間に
- * 0 が挿入される」。例) UNIPA "731" ⇔ QR "7301"。7 始まり以外 (例 "431") は変換なしで
- * 同一。この規則を逆適用して両者を UNIPA 正規形へ畳んでから比較するため、時間割側を
- * UNIPA 表記 ("731講義室") で持っても QR 表記 ("7301") で手入力しても一致する。
  *
- * 保守性: 4 桁・7 始まり・3 文字目が '0' の厳密パターンのときだけ 0 を取り除く。
- * それ以外は素通しなので、別教室を誤って同一視しない (例 "7310"/"7031" は畳まない)。
+ * 実機検証 (2026-06-26): 津田沼の "731講義室" の QR roomId は "7301"。
+ *   → 津田沼の **7 始まり 3 桁**教室は、QR では 2 桁目と 3 桁目の間に 0 が挿入され 4 桁になる。
+ * ただしユーザー談: **新習志野キャンパスの 7 始まり教室は native に 4 桁**。
+ *   → 新習志野の 4 桁室を 3 桁へ畳むと、津田沼の 3 桁室と衝突して別教室を誤一致させる。
  *
- * 注意: この規則はユーザーの記憶ベース。実機 (CIT_Wi-Fi) での matched pair 検証で
- * 確証を得るまでは「7 始まり 3 桁」以外には適用しない (フェイルセーフ: 不一致側に倒す)。
- * 残存リスク (medium): CIT 建物 7 に「畳まれた 3 桁由来でない native な 4 桁室番号
- * (7X0Y 形)」が実在すると、それを 3 桁室へ畳んで誤一致する理論的フェイルオープンがある。
- * auto 解禁 (M2) 前に実機 matched pair で 7 始まり室番号体系を確認して潰すこと。
+ * よって畳み込みは **一方向**にする:
+ *   - 完全一致 (core 同士) は常に true (新習志野 native 4 桁 "7301"⇔"7301" を含む)。
+ *   - **時間割側が 7 始まり 3 桁 "7XY" のときだけ**、QR 側 4 桁 "7X0Y" を畳んで突合する
+ *     (津田沼)。時間割が 4 桁 (新習志野) のときは畳まない。
+ *
+ * 残存リスク (low, 人手 confirm + 出席システムの履修判定が backstop): 津田沼の 3 桁時間割
+ * 教室と、新習志野の 4 桁 "7X0Y" QR を別キャンパスで取り違えてスキャンした場合は誤一致し得る。
+ * 根本対策は同期時に roomId を時間割へ保存して畳まず直接突合すること (将来)。
  */
-function toCanonicalCitRoom(core: string): string {
-  // WHY: 「7 始まり・4 桁・3 文字目が 0・**全桁が数字**」のときだけ畳む。
-  // 規則は 3 桁の数字教室コードが対象なので、英字/ハイフン/アンダースコアを含む
-  // 別教室 roomId (例 "7A01" や "7-01"。roomIdSchema は [A-Za-z0-9_-] を許容) を畳んで
-  // しまうと別教室と誤一致 (出席誤送信) する。数字限定の正規表現で厳密に絞る。
-  if (/^7\d0\d$/.test(core)) {
-    // "7301" → "731" (挿入された 0 を除去)
-    return core[0] + core[1] + core[3];
-  }
-  return core;
-}
-
 export function attendanceRoomMatches(
   timetableRoom: string | null | undefined,
   qrRoomId: string | null | undefined
@@ -226,9 +215,20 @@ export function attendanceRoomMatches(
 
   if (t.isEmpty || q.isEmpty) return false;
 
-  // 両方に英数字コアがあるなら、CIT 規則で UNIPA 正規形へ畳んで比較する。
   if (t.core !== null && q.core !== null) {
-    return toCanonicalCitRoom(t.core) === toCanonicalCitRoom(q.core);
+    // 完全一致: 新習志野 native 4 桁を含む全教室。
+    if (t.core === q.core) return true;
+    // 津田沼の 7 始まり 3 桁のみ: 時間割 "7XY" に対し QR は "7X0Y" (0 挿入)。
+    // ※全桁数字限定 ("7A01" 等の別教室 roomId を畳まない)。新習志野 4 桁を巻き込まない
+    //   よう、畳むのは **時間割側が 3 桁のとき**だけ。
+    if (
+      /^7\d\d$/.test(t.core) &&
+      /^7\d0\d$/.test(q.core) &&
+      q.core[0] + q.core[1] + q.core[3] === t.core
+    ) {
+      return true;
+    }
+    return false;
   }
 
   // 片方しかコアが無い → 異種表記とみなし不一致 (保守的)。

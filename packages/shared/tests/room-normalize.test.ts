@@ -210,3 +210,31 @@ describe('attendanceRoomMatches — CIT 7始まり3桁の0挿入規則', () => {
     expect(attendanceRoomMatches('オンライン', '7301')).toBe(false);
   });
 });
+
+/**
+ * 新習志野キャンパスの 7 始まり教室は native 4 桁 (ユーザー談)。
+ * 4 桁時間割教室を 3 桁へ畳むと津田沼の 3 桁室と衝突するため、畳み込みは一方向
+ * (時間割が 3 桁のときだけ QR 4 桁を畳む) にする回帰テスト。
+ */
+describe('attendanceRoomMatches — 新習志野 native 4桁の衝突防止', () => {
+  it('新習志野 native 4桁は完全一致で突合 (畳まない)', () => {
+    expect(attendanceRoomMatches('7301講義室', '7301')).toBe(true);
+    expect(attendanceRoomMatches('7401', '7401')).toBe(true);
+  });
+
+  it('4桁時間割教室を3桁へ畳んで誤一致させない (津田沼3桁との衝突防止)', () => {
+    // 旧実装は両側を畳み '7301'(新習志野) と '731'(津田沼) を同一視していた。
+    expect(attendanceRoomMatches('7301講義室', '731')).toBe(false);
+    expect(attendanceRoomMatches('7301', '731')).toBe(false);
+  });
+
+  it('別の新習志野 4桁教室は一致しない', () => {
+    expect(attendanceRoomMatches('7301', '7401')).toBe(false);
+    expect(attendanceRoomMatches('7301講義室', '7311')).toBe(false);
+  });
+
+  it('津田沼の 3桁⇔QR4桁 はこれまで通り一致 (回帰)', () => {
+    expect(attendanceRoomMatches('731講義室', '7301')).toBe(true);
+    expect(attendanceRoomMatches('712', '7102')).toBe(true);
+  });
+});
