@@ -25,6 +25,7 @@
     "next-auth": "5.0.0-beta.30",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "three": "^0.185.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
@@ -33,6 +34,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }
