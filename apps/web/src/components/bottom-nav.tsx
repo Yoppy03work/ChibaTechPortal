@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { label: '時間割', href: '/timetable' },
   { label: 'お知らせ', href: '/notifications' },
   { label: '出席', href: '/attendance' },
+  { label: 'マップ', href: '/map' },
   { label: '設定', href: '/settings' },
 ] as const;
 
