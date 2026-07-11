@@ -39,9 +39,10 @@ test.describe('お知らせ', () => {
     await expect(page.getByText('前期末試験の時間割を公開しました')).not.toBeVisible();
   });
 
-  test('メールフィルタで メール由来のお知らせだけに絞り込まれる', async ({ page }) => {
+  test('メールフィルタは未連携のため空状態が表示される', async ({ page }) => {
+    // WHY: メール収集は未実装（将来のソース）。チップは存在し、0件の空状態を出す
     await page.getByRole('button', { name: /メール/ }).click();
-    await expect(page.getByText('【大学メール】履修登録エラーのお知らせ')).toBeVisible();
+    await expect(page.getByText('このソースのお知らせはありません')).toBeVisible();
     await expect(page.getByText('前期末試験の時間割を公開しました')).not.toBeVisible();
   });
 });

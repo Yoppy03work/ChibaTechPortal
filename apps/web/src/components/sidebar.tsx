@@ -81,8 +81,9 @@ function NavButton({ item, pathname }: { item: Item; pathname: string }) {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ studentId = '' }: { studentId?: string }) {
   const pathname = usePathname();
+  const avatarChar = studentId ? studentId.charAt(0).toUpperCase() : '学';
   return (
     <aside
       className="ctp-sidebar"
@@ -120,10 +121,10 @@ export function Sidebar() {
           <NavButton key={it.label} item={it} pathname={pathname} />
         ))}
         <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: 10, borderRadius: 13, background: 'var(--surface-2)' }}>
-          <div aria-hidden="true" style={{ width: 38, height: 38, borderRadius: 999, background: 'linear-gradient(135deg,#2A2D31,#15171A)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-jp)', fontWeight: 700, fontSize: 15, flex: 'none' }}>健</div>
+          <div aria-hidden="true" style={{ width: 38, height: 38, borderRadius: 999, background: 'linear-gradient(135deg,#2A2D31,#15171A)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-jp)', fontWeight: 700, fontSize: 15, flex: 'none' }}>{avatarChar}</div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>千葉 健太</div>
-            <div style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>s23T0042</div>
+            <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'var(--font-mono)' }}>{studentId || '—'}</div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>Student Portal</div>
           </div>
         </div>
       </div>

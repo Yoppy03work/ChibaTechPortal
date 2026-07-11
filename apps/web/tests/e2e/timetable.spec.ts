@@ -38,8 +38,7 @@ test.describe('時間割', () => {
   });
 
   test('凡例が表示される', async ({ page }) => {
-    await expect(page.getByText('専門', { exact: true })).toBeVisible();
-    await expect(page.getByText('数理', { exact: true })).toBeVisible();
+    // WHY: 実データにはカテゴリが無いため凡例は「現在の授業」のみ
     await expect(page.getByText('現在の授業')).toBeVisible();
   });
 });

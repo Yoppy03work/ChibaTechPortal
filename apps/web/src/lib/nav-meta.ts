@@ -8,7 +8,7 @@ const WD = ['日', '月', '火', '水', '木', '金', '土'];
 
 export function todayGreeting(): string {
   const d = new Date();
-  return `${d.getMonth() + 1}月${d.getDate()}日 (${WD[d.getDay()]}) · こんにちは、健太さん`;
+  return `${d.getMonth() + 1}月${d.getDate()}日 (${WD[d.getDay()]}) · こんにちは`;
 }
 
 export function metaFor(pathname: string): Meta {

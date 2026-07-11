@@ -26,11 +26,13 @@ const circleBtn: React.CSSProperties = {
   boxShadow: 'var(--shadow-sm)',
 };
 
-export function AppHeader() {
+export function AppHeader({ studentId = '' }: { studentId?: string }) {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
   const { title, subtitle } = metaFor(pathname);
   const dark = theme === 'dark';
+  // WHY: 氏名は DB に無いため学籍番号の頭文字をアバターに使う
+  const avatarChar = studentId ? studentId.charAt(0).toUpperCase() : '学';
 
   return (
     <header
@@ -121,7 +123,7 @@ export function AppHeader() {
             boxShadow: 'var(--shadow-sm)',
           }}
         >
-          健
+          {avatarChar}
         </div>
       </div>
     </header>
