@@ -6,11 +6,12 @@
  * classDate は「JST の YYYY-MM-DD を UTC midnight で保存」する既存規約に従う。
  */
 import { prisma } from '@chibatech/db';
-import { PERIOD_START_TIMES, getJstParts, formatJstYmd } from '@chibatech/shared';
+import { PERIOD_START_TIMES, PERIOD_MINUTES, getJstParts, formatJstYmd } from '@chibatech/shared';
 import type { Channel, AssignmentStatus } from './portal-view';
 import { CHANNEL_LABEL } from './portal-view';
 
-const CLASS_MINUTES = 90;
+// WHY: CIT は 1時限=60分 の10限制（9:00〜19:00）
+const CLASS_MINUTES = PERIOD_MINUTES;
 const WD = ['日', '月', '火', '水', '木', '金', '土'];
 const two = (n: number) => String(n).padStart(2, '0');
 
@@ -81,7 +82,8 @@ export interface WeekCell {
 
 export async function getWeekGrid(userId: string): Promise<{ grid: (WeekCell | null)[][]; maxPeriod: number }> {
   const rows = await prisma.timetable.findMany({ where: { userId } });
-  const maxPeriod = Math.min(6, Math.max(5, ...rows.map((r) => r.period), 5));
+  // WHY: 10限制。データに存在する最大時限まで表示（最低5限は常に見せる）
+  const maxPeriod = Math.min(10, Math.max(5, ...rows.map((r) => r.period), 5));
   // grid[day(月=0..土=5)][period-1]
   const grid: (WeekCell | null)[][] = Array.from({ length: 6 }, () => Array<WeekCell | null>(maxPeriod).fill(null));
   for (const r of rows) {

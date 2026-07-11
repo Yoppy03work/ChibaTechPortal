@@ -24,7 +24,7 @@ function validInput(): AttendanceAutoGuardInput {
     jobRoomId: '8109',
     dayOfWeek: 1,
     period: 1,
-    now: new Date('2026-05-04T09:25:00+09:00'),
+    now: new Date('2026-05-04T08:55:00+09:00'),
     alreadySubmitted: false,
     qrSessionValid: true,
   };
@@ -68,28 +68,28 @@ describe('evaluateAttendanceAutoGuard', () => {
   });
 
   it('授業開始5分前のターゲットから ±2 分を超える時刻は拒否する', () => {
-    // WHY: 1 限 9:30 開始 - 5 分 = 9:25 がターゲット。±2 分の許容幅外 (9:22 や 9:28) は reject
+    // WHY: 1 限 9:00 開始 - 5 分 = 8:55 がターゲット。±2 分の許容幅外 (8:52 や 8:58) は reject
     const tooEarly = evaluateAttendanceAutoGuard({
       ...validInput(),
-      now: new Date('2026-05-04T09:22:00+09:00'),
+      now: new Date('2026-05-04T08:52:00+09:00'),
     });
     expect(tooEarly.allowed).toBe(false);
 
     const tooLate = evaluateAttendanceAutoGuard({
       ...validInput(),
-      now: new Date('2026-05-04T09:28:00+09:00'),
+      now: new Date('2026-05-04T08:58:00+09:00'),
     });
     expect(tooLate.allowed).toBe(false);
   });
 
   // WHY: Scheduler / BullMQ のラグで ±1〜2 分ズレても reject せず、安定して
-  // ジョブを処理できるようにする許容幅。ターゲット (9:25) ±2 分 = 9:23〜9:27
+  // ジョブを処理できるようにする許容幅。ターゲット (8:55) ±2 分 = 8:53〜8:57
   it.each([
-    ['ターゲット完全一致', 9, 25],
-    ['ターゲット -1 分', 9, 24],
-    ['ターゲット +1 分', 9, 26],
-    ['ターゲット -2 分 (境界)', 9, 23],
-    ['ターゲット +2 分 (境界)', 9, 27],
+    ['ターゲット完全一致', 8, 55],
+    ['ターゲット -1 分', 8, 54],
+    ['ターゲット +1 分', 8, 56],
+    ['ターゲット -2 分 (境界)', 8, 53],
+    ['ターゲット +2 分 (境界)', 8, 57],
   ])('授業開始 5 分前 ±2 分の範囲 (%s = %d:%d) は許可する', (_label, hour, minute) => {
     const result = evaluateAttendanceAutoGuard({
       ...validInput(),
@@ -141,7 +141,7 @@ function validPreNetworkInput(): AttendanceAutoGuardPreNetworkInput {
     jobRoomId: '8109',
     dayOfWeek: 1,
     period: 1,
-    now: new Date('2026-05-04T09:25:00+09:00'),
+    now: new Date('2026-05-04T08:55:00+09:00'),
     alreadySubmitted: false,
     qrSessionValid: true,
   };

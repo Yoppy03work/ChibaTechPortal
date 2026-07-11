@@ -7,7 +7,7 @@
  */
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
-import { getJstParts, PERIOD_START_TIMES } from '@chibatech/shared';
+import { getJstParts, PERIOD_START_TIMES, PERIOD_MINUTES } from '@chibatech/shared';
 import { getWeekGrid, periodList } from '@/lib/portal-data';
 import { classTier } from '@/lib/portal-view';
 
@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
 
 const GRID_COLS = '24px repeat(6,1fr)';
 const DAY_LABELS = ['月', '火', '水', '木', '金', '土'];
-const CLASS_MINUTES = 90;
+const CLASS_MINUTES = PERIOD_MINUTES;
 
 export default async function TimetablePage() {
   const session = await auth();

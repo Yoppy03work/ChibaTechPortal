@@ -7,15 +7,28 @@
  * に依存しないよう Intl Asia/Tokyo で時/分/曜日を取り出す。
  */
 
-/** 各時限の開始時刻（JST, 時:分） */
+/**
+ * 各時限の開始時刻（JST, 時:分）
+ *
+ * WHY: 千葉工大は 1時限=60分 の10限制（1限 9:00–10:00 … 10限 18:00–19:00）。
+ * 実際の授業は 2 時限連続（例: 1-2限 = 9:00–11:00）で開講されることが多く、
+ * 時間割データは時限ごとに 1 行になる。
+ */
 export const PERIOD_START_TIMES: Record<number, { hour: number; minute: number }> = {
-  1: { hour: 9, minute: 30 },
-  2: { hour: 11, minute: 10 },
-  3: { hour: 13, minute: 10 },
-  4: { hour: 14, minute: 50 },
-  5: { hour: 16, minute: 30 },
-  6: { hour: 18, minute: 10 },
+  1: { hour: 9, minute: 0 },
+  2: { hour: 10, minute: 0 },
+  3: { hour: 11, minute: 0 },
+  4: { hour: 12, minute: 0 },
+  5: { hour: 13, minute: 0 },
+  6: { hour: 14, minute: 0 },
+  7: { hour: 15, minute: 0 },
+  8: { hour: 16, minute: 0 },
+  9: { hour: 17, minute: 0 },
+  10: { hour: 18, minute: 0 },
 };
+
+/** 1時限の長さ（分） */
+export const PERIOD_MINUTES = 60;
 
 /** 授業開始の何分前を出席ターゲットにするか */
 export const ATTENDANCE_LEAD_MINUTES = 5;

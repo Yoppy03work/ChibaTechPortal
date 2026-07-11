@@ -12,14 +12,18 @@ import {
 } from '../src/lib/attendance-schedule';
 
 describe('attendance-schedule 定数', () => {
-  it('PERIOD_START_TIMES は 1〜6 限の JST 開始時刻', () => {
+  it('PERIOD_START_TIMES は 1〜10 限 (毎時 60 分) の JST 開始時刻', () => {
     expect(PERIOD_START_TIMES).toEqual({
-      1: { hour: 9, minute: 30 },
-      2: { hour: 11, minute: 10 },
-      3: { hour: 13, minute: 10 },
-      4: { hour: 14, minute: 50 },
-      5: { hour: 16, minute: 30 },
-      6: { hour: 18, minute: 10 },
+      1: { hour: 9, minute: 0 },
+      2: { hour: 10, minute: 0 },
+      3: { hour: 11, minute: 0 },
+      4: { hour: 12, minute: 0 },
+      5: { hour: 13, minute: 0 },
+      6: { hour: 14, minute: 0 },
+      7: { hour: 15, minute: 0 },
+      8: { hour: 16, minute: 0 },
+      9: { hour: 17, minute: 0 },
+      10: { hour: 18, minute: 0 },
     });
   });
 

@@ -128,10 +128,10 @@ function confirmJobData() {
   };
 }
 
-// 1 限 9:30 開始 - 5 分 = 9:25 がターゲット (月曜) — JST 固定で TZ 非依存
+// 1 限 9:00 開始 - 5 分 = 8:55 がターゲット (月曜) — JST 固定で TZ 非依存
 // WHY: guard は Asia/Tokyo で評価する。テスト側もコンテナ TZ (CI=UTC) に依らない
 // よう JST 明示で system time を固定する。
-const IN_WINDOW = new Date('2026-05-04T09:25:00+09:00');
+const IN_WINDOW = new Date('2026-05-04T08:55:00+09:00');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -266,7 +266,7 @@ describe('processAttendanceJob — method=confirm guard reject', () => {
   });
 
   it('時刻ウィンドウ外 (9:22) で adapter は呼ばれない', async () => {
-    vi.setSystemTime(new Date('2026-05-04T09:22:00+09:00'));
+    vi.setSystemTime(new Date('2026-05-04T08:52:00+09:00'));
     timetableFindUnique.mockResolvedValue(timetableRow());
     const adapter = makeAdapter();
 

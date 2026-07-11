@@ -409,7 +409,7 @@ describe('processAttendanceJob — 監査ログ', () => {
 // ============================================================
 // auto 解禁 (M2-D): enabled + allowlisted + 有効 QR セッション
 // ============================================================
-const IN_WINDOW = new Date('2026-05-04T09:25:00+09:00'); // 月曜 1限 -5分
+const IN_WINDOW = new Date('2026-05-04T08:55:00+09:00'); // 月曜 1限(9:00) -5分
 
 describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
   function enableAuto() {

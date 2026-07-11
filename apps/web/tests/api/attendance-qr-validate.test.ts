@@ -26,7 +26,7 @@ vi.mock('@/lib/rate-limiter', () => ({
 
 import { POST } from '@/app/api/attendance/qr-validate/route';
 
-const IN_WINDOW = new Date('2026-05-04T09:25:00+09:00'); // 月曜 1限 -5分
+const IN_WINDOW = new Date('2026-05-04T08:55:00+09:00'); // 月曜 1限(9:00) -5分
 const TODAY_ISO = '2026-05-04';
 
 function makeReq(body: unknown): Request {
