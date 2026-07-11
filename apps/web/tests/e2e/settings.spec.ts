@@ -15,13 +15,14 @@ test.describe('設定', () => {
   test('表示設定（文字サイズ・テーマ）が表示される', async ({ page }) => {
     await expect(page.getByText('文字サイズ')).toBeVisible();
     await expect(page.getByText('テーマ', { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'ダーク' })).toBeVisible();
+    // WHY: ヘッダーのテーマトグル（aria-label「ダークモードに切り替え」）と部分一致しないよう exact
+    await expect(page.getByRole('button', { name: 'ダーク', exact: true })).toBeVisible();
   });
 
   test('テーマをダークに切り替えられる', async ({ page }) => {
-    await page.getByRole('button', { name: 'ダーク' }).click();
+    await page.getByRole('button', { name: 'ダーク', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-    await page.getByRole('button', { name: 'ライト' }).click();
+    await page.getByRole('button', { name: 'ライト', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   });
 

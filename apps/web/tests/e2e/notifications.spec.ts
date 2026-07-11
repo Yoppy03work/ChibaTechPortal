@@ -16,7 +16,8 @@ test.describe('お知らせ', () => {
   });
 
   test('お知らせページのヘッダーが表示される', async ({ page }) => {
-    await expect(page.getByText('CIT Portal・manaba・メール を集約')).toBeVisible();
+    // WHY: hidden のデスクトップトップバーにも同じ副題があるため先頭（モバイルヘッダー）に限定
+    await expect(page.getByText('CIT Portal・manaba・メール を集約').first()).toBeVisible();
   });
 
   test('ソース別フィルタが表示される', async ({ page }) => {

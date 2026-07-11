@@ -30,7 +30,8 @@ test.describe('ダッシュボード', () => {
   });
 
   test('お知らせセクションが表示される', async ({ page }) => {
-    await expect(page.getByText('お知らせ', { exact: true }).first()).toBeVisible();
+    // WHY: hidden のデスクトップサイドバーにも「お知らせ」があるため main に限定
+    await expect(page.locator('main').getByText('お知らせ', { exact: true })).toBeVisible();
   });
 
   test('出席サマリーセクションが表示される', async ({ page }) => {

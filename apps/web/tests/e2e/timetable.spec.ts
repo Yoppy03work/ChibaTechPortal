@@ -16,7 +16,8 @@ test.describe('時間割', () => {
   });
 
   test('時間割ページのヘッダーが表示される', async ({ page }) => {
-    await expect(page.getByText('2026年度 前期')).toBeVisible();
+    // WHY: hidden のデスクトップトップバーにも同じ副題があるため先頭（モバイルヘッダー）に限定
+    await expect(page.getByText('2026年度 前期').first()).toBeVisible();
   });
 
   test('曜日ヘッダー（月〜土）が表示される', async ({ page }) => {
