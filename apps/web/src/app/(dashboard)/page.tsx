@@ -66,7 +66,7 @@ export default async function DashboardPage() {
   const now = new Date();
   const [today, news, unread, weekStats, termStats] = await Promise.all([
     getTodayClasses(userId, now),
-    getNotifications(userId, 4, now),
+    getNotifications(userId, 8, now),
     getUnreadCount(userId),
     getAttendanceOverview(userId, 7),
     getAttendanceOverview(userId, 120),
@@ -127,6 +127,7 @@ export default async function DashboardPage() {
                           {heroRow.room}
                         </span>
                       )}
+                      {heroRow.teacher && <span>{heroRow.teacher}</span>}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 9 }}>
@@ -173,7 +174,7 @@ export default async function DashboardPage() {
                   <div style={{ width: 3, height: 34, borderRadius: 2, background: chip.dot, flex: 'none' }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14.5, fontWeight: 600 }}>{c.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 1 }}>{c.room || `${c.period}限`}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 1 }}>{[c.room || `${c.period}限`, c.teacher].filter(Boolean).join(' · ')}</div>
                   </div>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600, padding: '4px 11px', borderRadius: 999, background: chip.stBg, color: chip.stFg, border: `1px solid ${chip.stBorder}`, flex: 'none' }}>
                     {chip.live && <span style={{ width: 6, height: 6, borderRadius: 999, background: chip.stFg }} />}

@@ -8,11 +8,17 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTheme } from './theme-provider';
 import { metaFor } from '@/lib/nav-meta';
+import { useNowText } from './use-now-text';
 
 export function DesktopTopbar() {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
-  const { title, subtitle } = metaFor(pathname);
+  const meta = metaFor(pathname);
+  const nowText = useNowText();
+  const isHome = pathname === '/';
+  // WHY: ホームは年月日+ライブ時計を表示（マウント前は静的な日付でフォールバック）
+  const subtitle = isHome && nowText ? nowText : meta.subtitle;
+  const title = meta.title;
   const dark = theme === 'dark';
 
   const iconBtn: React.CSSProperties = {
@@ -52,10 +58,13 @@ export function DesktopTopbar() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, width: 248, height: 40, padding: '0 13px', borderRadius: 11, background: 'var(--surface-2)', border: '1px solid var(--line)' }}>
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
-          <input type="text" placeholder="検索（科目・お知らせ）" aria-label="検索" style={{ border: 'none', outline: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 13, color: 'var(--ink)', width: '100%' }} />
-        </div>
+        {/* WHY: ホームには検索バーを出さない（本人要望） */}
+        {!isHome && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, width: 248, height: 40, padding: '0 13px', borderRadius: 11, background: 'var(--surface-2)', border: '1px solid var(--line)' }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+            <input type="text" placeholder="検索（科目・お知らせ）" aria-label="検索" style={{ border: 'none', outline: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 13, color: 'var(--ink)', width: '100%' }} />
+          </div>
+        )}
 
         <Link href="/notifications" aria-label="お知らせ" style={iconBtn}>
           <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M6 9a6 6 0 1 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg>

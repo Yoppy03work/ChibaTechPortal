@@ -26,6 +26,8 @@ export interface TodayClassRow {
   startMin: number;
   name: string;
   room: string;
+  /** 担当教員（Syllabus 由来。未取得なら空文字） */
+  teacher: string;
   status: ScheduleStatus;
 }
 
@@ -47,6 +49,8 @@ export async function getTodayClasses(userId: string, now = new Date()): Promise
   const rows = await prisma.timetable.findMany({
     where: { userId, dayOfWeek: jst.dayOfWeek },
     orderBy: { period: 'asc' },
+    // WHY: 担当教員は Timetable に無く Syllabus(instructor) から結合する
+    include: { syllabus: { select: { instructor: true } } },
   });
   const nowMin = jst.hour * 60 + jst.minute;
   let nextAssigned = false;
@@ -69,6 +73,7 @@ export async function getTodayClasses(userId: string, now = new Date()): Promise
       startMin: t.startMin,
       name: r.className,
       room: r.room ?? '',
+      teacher: r.syllabus?.instructor ?? '',
       status,
     };
   });
