@@ -15,14 +15,15 @@ test.describe('ダッシュボード', () => {
   });
 
   test('統計カード（今日の授業・出席率・未読）が表示される', async ({ page }) => {
-    await expect(page.getByText('今日の授業')).toBeVisible();
+    await expect(page.getByText('今日の授業', { exact: true })).toBeVisible();
     await expect(page.getByText('今週の出席率')).toBeVisible();
     await expect(page.getByText('未読お知らせ')).toBeVisible();
   });
 
   test('次の授業ヒーローが表示される', async ({ page }) => {
-    await expect(page.getByText('次の授業', { exact: false }).first()).toBeVisible();
-    await expect(page.getByRole('link', { name: '出席する' })).toBeVisible();
+    // WHY: 実データ版はCIの実行時刻で「次の授業/進行中/終了」いずれにもなり得るため
+    // ヒーローのバッジ文言のどれかが出ていればよい
+    await expect(page.getByText(/次の授業|進行中の授業/).first()).toBeVisible();
   });
 
   test('今日の時間割セクションが表示される', async ({ page }) => {

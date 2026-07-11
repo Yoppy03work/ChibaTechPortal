@@ -24,12 +24,13 @@ export default async function DashboardLayout({
   if (!session?.user?.id) {
     redirect('/login');
   }
+  const studentId = (session.user as { studentId?: string }).studentId || '';
 
   return (
     <div className="ctp-shell">
-      <Sidebar />
+      <Sidebar studentId={studentId} />
       <div className="ctp-main">
-        <AppHeader />
+        <AppHeader studentId={studentId} />
         <DesktopTopbar />
         <main className="ctp-content ctp-scroll">{children}</main>
       </div>
