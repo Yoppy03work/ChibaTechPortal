@@ -26,17 +26,17 @@ const TOP: Item[] = [
   { label: 'ホーム', href: '/', icon: (<svg {...ic}><path d="M4 11.4 12 4l8 7.4" /><path d="M6 10.2V20h12v-9.8" /></svg>) },
   { label: '時間割', href: '/timetable', icon: (<svg {...ic}><rect x="4" y="5" width="16" height="16" rx="2.4" /><path d="M4 9.5h16M9 3v3M15 3v3" /><path d="M8.5 13h.01M12 13h.01M15.5 13h.01M8.5 17h.01M12 17h.01" /></svg>) },
   { label: '課題', href: '/assignments', icon: (<svg {...ic}><rect x="5" y="4" width="14" height="17" rx="2.2" /><path d="M9 4.5V3.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1" /><path d="M8.6 13.2l2.2 2.2 4.2-4.4" /></svg>) },
-  { label: '資料', icon: (<svg {...ic}><path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /></svg>) },
+  { label: '資料', href: '/materials', icon: (<svg {...ic}><path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /></svg>) },
   { label: '出席', href: '/status', icon: (<svg {...ic}><circle cx="12" cy="12" r="9" /><path d="M8.4 12.4l2.4 2.4 4.8-5" /></svg>) },
   { label: 'お知らせ', href: '/notifications', icon: (<svg {...ic}><path d="M6 9a6 6 0 1 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg>) },
-  { label: 'シラバス', icon: (<svg {...ic}><path d="M12 6.5C10.5 5 8 4.6 4.5 5v13c3.5-.4 6 0 7.5 1.5 1.5-1.5 4-1.9 7.5-1.5V5C16 4.6 13.5 5 12 6.5z" /><path d="M12 6.5V20" /></svg>) },
-  { label: '学生資料室', icon: (<svg {...ic}><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8M10 12h4" /></svg>) },
+  { label: 'シラバス', href: '/syllabus', icon: (<svg {...ic}><path d="M12 6.5C10.5 5 8 4.6 4.5 5v13c3.5-.4 6 0 7.5 1.5 1.5-1.5 4-1.9 7.5-1.5V5C16 4.6 13.5 5 12 6.5z" /><path d="M12 6.5V20" /></svg>) },
+  { label: '学生資料室', href: '/library', icon: (<svg {...ic}><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8M10 12h4" /></svg>) },
   { label: 'キャンパス', href: '/campus', icon: (<svg {...ic}><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>) },
   { label: '交通ダイヤ', href: '/bus', icon: (<svg {...ic}><rect x="4" y="4" width="16" height="12" rx="2" /><path d="M4 11h16M8 16v2.4M16 16v2.4" /><circle cx="8" cy="13.4" r="0.9" fill="currentColor" stroke="none" /><circle cx="16" cy="13.4" r="0.9" fill="currentColor" stroke="none" /></svg>) },
 ];
 
 const BOTTOM: Item[] = [
-  { label: 'リンク集', icon: (<svg {...ic}><rect x="3" y="4" width="18" height="6" rx="1.6" /><rect x="3" y="14" width="18" height="6" rx="1.6" /></svg>) },
+  { label: 'リンク集', href: '/links', icon: (<svg {...ic}><rect x="3" y="4" width="18" height="6" rx="1.6" /><rect x="3" y="14" width="18" height="6" rx="1.6" /></svg>) },
   { label: '設定', href: '/settings', icon: (<svg {...ic}><circle cx="12" cy="12" r="3.2" /><path d="M12 3v2.4M12 18.6V21M21 12h-2.4M5.4 12H3M18.4 5.6l-1.7 1.7M7.3 16.7l-1.7 1.7M18.4 18.4l-1.7-1.7M7.3 7.3L5.6 5.6" /></svg>) },
 ];
 

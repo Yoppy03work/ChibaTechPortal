@@ -8,6 +8,7 @@
  * 認証情報はサーバー側で AES-256-GCM 暗号化して保存（平文はDBに残さない）。
  */
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { signOut } from 'next-auth/react';
 import { useTheme } from '@/components/theme-provider';
 
@@ -170,10 +171,32 @@ export function SettingsForm({ studentId }: { studentId: string }) {
         </div>
       </div>
 
+      {/* 外部連携 */}
+      <div style={{ ...card, padding: '18px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>外部連携</div>
+          <Link href="/integrations" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, padding: '8px 14px', borderRadius: 10, background: 'var(--ink)', color: 'var(--surface)', textDecoration: 'none' }}>
+            連携を管理
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+          </Link>
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 3 }}>カレンダー同期・外部サービスとの接続</div>
+      </div>
+
       {/* アプリ情報 */}
       <div style={{ ...card, padding: '18px 20px 6px' }}>
         <div style={{ fontSize: 14, fontWeight: 700, paddingBottom: 8 }}>アプリ情報</div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '8px 0', borderTop: '1px solid var(--line)' }}><span style={{ fontSize: 13, color: 'var(--ink-3)' }}>バージョン</span><span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>1.0.0</span></div>
+        {[
+          { href: '/terms', label: '利用規約' },
+          { href: '/privacy', label: 'プライバシーポリシー' },
+          { href: '/support', label: 'サポート窓口' },
+        ].map((l) => (
+          <Link key={l.href} href={l.href} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '12px 0', borderTop: '1px solid var(--line)', width: '100%', textDecoration: 'none', color: 'var(--ink)' }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{l.label}</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+          </Link>
+        ))}
       </div>
     </div>
   );
