@@ -148,6 +148,7 @@ export {
 
 export {
   PERIOD_START_TIMES,
+  PERIOD_MINUTES,
   ATTENDANCE_LEAD_MINUTES,
   getJstParts,
   type JstParts,

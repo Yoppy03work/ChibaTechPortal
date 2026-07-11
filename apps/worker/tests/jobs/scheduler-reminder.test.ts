@@ -23,8 +23,8 @@ vi.mock('@chibatech/db', () => ({
 
 import { enqueueConfirmReminders } from '../../src/jobs/scheduler';
 
-// 2026-05-04T00:20:00Z = JST 月曜 09:20 = 1限(9:30) の 10 分前 = リマインダ時刻
-const REMINDER_TIME = new Date('2026-05-04T00:20:00Z');
+// 2026-05-03T23:50:00Z = JST 月曜 08:50 = 1限(9:00) の 10 分前 = リマインダ時刻
+const REMINDER_TIME = new Date('2026-05-03T23:50:00Z');
 
 function ttRow(mode: string) {
   return {
@@ -77,7 +77,7 @@ describe('enqueueConfirmReminders', () => {
     expect(notifyAdd).not.toHaveBeenCalled();
   });
 
-  it('リマインダ時刻でない分には投入しない (09:25 は出席ウィンドウだがリマインダではない)', async () => {
+  it('リマインダ時刻でない分には投入しない (09:25 はどの時限のリマインダ時刻でもない)', async () => {
     process.env.CONFIRM_REMINDER_ENABLED = 'true';
     vi.setSystemTime(new Date('2026-05-04T00:25:00Z'));
     await enqueueConfirmReminders();

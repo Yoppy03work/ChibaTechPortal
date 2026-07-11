@@ -13,8 +13,8 @@ import {
 } from '../src/lib/attendance-confirm-guard';
 
 function validInput(): ConfirmSubmitGuardInput {
-  // 1限ターゲット (9:25 = 9:30 - 5) で月曜
-  const now = new Date('2026-05-04T09:25:00+09:00'); // 月曜
+  // 1限ターゲット (8:55 = 9:00 - 5) で月曜
+  const now = new Date('2026-05-04T08:55:00+09:00'); // 月曜
   return {
     jobUserId: 'user-1',
     jobTimetableId: 'tt-1',
@@ -85,7 +85,7 @@ describe('evaluateConfirmSubmitGuard', () => {
   it('時刻ウィンドウ外 (9:22 = -3 分) なら outside_time_window', () => {
     const r = evaluateConfirmSubmitGuard({
       ...validInput(),
-      now: new Date('2026-05-04T09:22:00+09:00'),
+      now: new Date('2026-05-04T08:52:00+09:00'),
       // jobClassDateYmd は同日のままにする
       jobClassDateYmd: '2026-05-04',
     });
@@ -95,7 +95,7 @@ describe('evaluateConfirmSubmitGuard', () => {
   it('±2 分許容内 (9:27 = +2 分) なら通過', () => {
     const r = evaluateConfirmSubmitGuard({
       ...validInput(),
-      now: new Date('2026-05-04T09:27:00+09:00'),
+      now: new Date('2026-05-04T08:57:00+09:00'),
       jobClassDateYmd: '2026-05-04',
     });
     expect(r).toEqual({ allowed: true });

@@ -18,7 +18,7 @@ const SAMPLE: AttendanceTargetTimetable[] = [
 
 describe('resolveAttendanceTarget', () => {
   it('時間ウィンドウ内 (1限 9:25 月曜) で unique 判定する', () => {
-    // WHY: 1 限は 9:30 開始 - 5 分 = 9:25 がターゲット。±2 分許容
+    // WHY: 1 限は 9:00 開始 - 5 分 = 8:55 がターゲット。±2 分許容
     const now = new Date(2026, 4, 4, 9, 25, 0); // 月曜
     const result = resolveAttendanceTarget(SAMPLE, now);
     expect(result.kind).toBe('unique');

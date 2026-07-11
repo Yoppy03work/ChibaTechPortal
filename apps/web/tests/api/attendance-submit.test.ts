@@ -47,10 +47,10 @@ vi.mock('@/lib/rate-limiter', () => ({
 
 import { POST } from '@/app/api/attendance/submit/route';
 
-// 1 限 9:30 開始 - 5 分 = 9:25 がターゲット (月曜) — JST 固定で TZ 非依存
+// 1 限 9:00 開始 - 5 分 = 8:55 がターゲット (月曜) — JST 固定で TZ 非依存
 // WHY: confirm-guard は Asia/Tokyo で評価する。テスト側もコンテナ TZ (CI=UTC) に
 // 依らないよう JST 明示で system time を固定する。
-const IN_WINDOW = new Date('2026-05-04T09:25:00+09:00');
+const IN_WINDOW = new Date('2026-05-04T08:55:00+09:00');
 const TODAY_ISO = '2026-05-04';
 
 function makeReq(body: unknown): Request {
@@ -289,7 +289,7 @@ describe('POST /api/attendance/submit — guard reject', () => {
   });
 
   it('時刻ウィンドウ外で 400 + reason=outside_time_window', async () => {
-    vi.setSystemTime(new Date('2026-05-04T09:22:00+09:00'));
+    vi.setSystemTime(new Date('2026-05-04T08:52:00+09:00'));
     authMock.mockResolvedValue({ user: { id: 'user-1' } });
     timetableFindUnique.mockResolvedValue(timetableRow());
     const res = await POST(makeReq(validBody()));
