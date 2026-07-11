@@ -46,7 +46,7 @@ test.describe('認証フロー', () => {
 
   test('ログイン成功後ダッシュボードに遷移する', async ({ page }) => {
     await loginAs(page);
-    await expect(page.getByText('今日の授業')).toBeVisible();
+    await expect(page.getByText('今日の授業', { exact: true })).toBeVisible();
   });
 
   test('ログアウトするとログインページに遷移する', async ({ page }) => {

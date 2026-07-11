@@ -15,7 +15,7 @@ test.describe('ダッシュボード', () => {
   });
 
   test('統計カード（今日の授業・出席率・未読）が表示される', async ({ page }) => {
-    await expect(page.getByText('今日の授業')).toBeVisible();
+    await expect(page.getByText('今日の授業', { exact: true })).toBeVisible();
     await expect(page.getByText('今週の出席率')).toBeVisible();
     await expect(page.getByText('未読お知らせ')).toBeVisible();
   });
