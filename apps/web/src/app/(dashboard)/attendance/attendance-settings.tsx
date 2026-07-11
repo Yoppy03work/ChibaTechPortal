@@ -4,8 +4,9 @@
  * 出席モード設定（Client Component）
  *
  * WHY: 3 モード（manual / confirm / auto）から 1 つを選ぶ。
- * auto は 6 条件チェック + 監査ログが整うまで「準備中」で disabled に倒している。
- * これは段階的解禁設計の安全装置（PR4 で解禁予定）。
+ * auto の実送信は Worker 側の段階解禁フラグ（attendance-rollout: マスタースイッチ +
+ * allowlist + dry-run、いずれも fail-closed 既定OFF）と多重ガード + QRセッション検証で
+ * 制御される。UI で auto を選んでも env を解禁しない限り外部送信は発生しない。
  */
 import { useState } from 'react';
 import type { AttendanceMode } from '@chibatech/shared';
@@ -32,9 +33,9 @@ const MODE_OPTIONS: ModeOption[] = [
   {
     value: 'auto',
     label: '自動',
-    description: '条件をすべて満たした時だけ自動送信',
-    disabled: true,
-    disabledReason: '準備中（条件チェックと監査ログ実装後に解禁）',
+    // WHY: 実送信には当日のQRスキャン（QRセッション）+ 学内ネットワーク + Worker側の
+    // 段階解禁フラグが必要。モードを選ぶだけでは送信されない。
+    description: '当日QRスキャン済みの授業だけ、条件をすべて満たした時に自動送信（段階解禁中）',
   },
 ];
 
