@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTheme } from './theme-provider';
 import { metaFor } from '@/lib/nav-meta';
+import { useNowText } from './use-now-text';
 
 const circleBtn: React.CSSProperties = {
   position: 'relative',
@@ -29,7 +30,11 @@ const circleBtn: React.CSSProperties = {
 export function AppHeader({ studentId = '' }: { studentId?: string }) {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
-  const { title, subtitle } = metaFor(pathname);
+  const meta = metaFor(pathname);
+  const nowText = useNowText();
+  // WHY: ホームは年月日+ライブ時計を表示（マウント前は静的な日付でフォールバック）
+  const subtitle = pathname === '/' && nowText ? nowText : meta.subtitle;
+  const title = meta.title;
   const dark = theme === 'dark';
   // WHY: 氏名は DB に無いため学籍番号の頭文字をアバターに使う
   const avatarChar = studentId ? studentId.charAt(0).toUpperCase() : '学';
