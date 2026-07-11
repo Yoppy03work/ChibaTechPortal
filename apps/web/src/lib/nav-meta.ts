@@ -23,5 +23,13 @@ export function metaFor(pathname: string): Meta {
   if (pathname.startsWith('/map')) return { title: 'キャンパス', subtitle: '津田沼・新習志野・茜浜' };
   if (pathname.startsWith('/settings')) return { title: '設定', subtitle: '表示・通知・アカウント' };
   if (pathname.startsWith('/attendance')) return { title: '出席登録', subtitle: 'QR出席・確認' };
+  if (pathname.startsWith('/syllabus')) return { title: 'シラバス', subtitle: '履修科目と講義概要' };
+  if (pathname.startsWith('/materials')) return { title: '授業資料・メモ', subtitle: '録音・ノート・配布資料をまとめて保管' };
+  if (pathname.startsWith('/library')) return { title: '学生資料室', subtitle: '各種データ・資料をまとめて保管／配布' };
+  if (pathname.startsWith('/links')) return { title: 'リンク集', subtitle: '学内の各種リンクをまとめて' };
+  if (pathname.startsWith('/integrations')) return { title: '外部連携', subtitle: 'カレンダー同期・外部サービス' };
+  if (pathname.startsWith('/terms')) return { title: '利用規約', subtitle: '最終更新 2026年4月1日' };
+  if (pathname.startsWith('/privacy')) return { title: 'プライバシーポリシー', subtitle: '最終更新 2026年4月1日' };
+  if (pathname.startsWith('/support')) return { title: 'サポート窓口', subtitle: '困ったときの窓口・よくある質問' };
   return { title: 'ChibaTech Portal', subtitle: '' };
 }
