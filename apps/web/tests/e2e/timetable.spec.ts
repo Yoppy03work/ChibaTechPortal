@@ -1,5 +1,8 @@
 /**
- * E2E: 時間割管理
+ * E2E: 時間割（週表示グリッド リデザイン準拠）
+ *
+ * WHY: リデザイン後は閲覧専用の週間グリッド（フェーズ1はモック）。
+ * 旧UIの編集モーダル（追加/保存）は廃止されたためテストも表示検証に置き換える。
  */
 import { test, expect } from '@playwright/test';
 import { loginAs } from './helpers/auth';
@@ -12,9 +15,9 @@ test.describe('時間割', () => {
     await page.goto('/timetable');
   });
 
-  test('時間割ページのタイトルが表示される', async ({ page }) => {
-    // WHY: BottomNavにも「時間割」リンクがあるため、heading で限定する
-    await expect(page.getByRole('heading', { name: '時間割' })).toBeVisible();
+  test('時間割ページのヘッダーが表示される', async ({ page }) => {
+    // WHY: hidden のデスクトップトップバーにも同じ副題があるため先頭（モバイルヘッダー）に限定
+    await expect(page.getByText('2026年度 前期').first()).toBeVisible();
   });
 
   test('曜日ヘッダー（月〜土）が表示される', async ({ page }) => {
@@ -23,43 +26,20 @@ test.describe('時間割', () => {
     }
   });
 
-  test('時限（1〜6）が表示される', async ({ page }) => {
-    for (const period of ['1', '2', '3', '4', '5', '6']) {
+  test('時限（1〜5）が表示される', async ({ page }) => {
+    for (const period of ['1', '2', '3', '4', '5']) {
       await expect(page.getByText(period, { exact: true }).first()).toBeVisible();
     }
   });
 
-  test('セルをクリックすると編集モーダルが表示される', async ({ page }) => {
-    // 月曜1限のセルをクリック
-    const cells = page.locator('td.cursor-pointer');
-    await cells.first().click();
-
-    // モーダルが表示される
-    await expect(page.getByText('授業名')).toBeVisible();
-    await expect(page.getByText('教室')).toBeVisible();
-    await expect(page.getByRole('button', { name: '保存' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '閉じる' })).toBeVisible();
+  test('授業セルが表示される', async ({ page }) => {
+    await expect(page.getByText('情報理論').first()).toBeVisible();
+    await expect(page.getByText('確率統計').first()).toBeVisible();
   });
 
-  test('授業を追加できる', async ({ page }) => {
-    const cells = page.locator('td.cursor-pointer');
-    await cells.first().click();
-
-    await page.getByPlaceholder('プログラミングII').fill('数学基礎');
-    await page.getByPlaceholder('8109').fill('7201');
-    await page.getByRole('button', { name: '保存' }).click();
-
-    // モーダルが閉じてグリッドに反映
-    await expect(page.getByText('数学基礎')).toBeVisible();
-    await expect(page.getByText('7201')).toBeVisible();
-  });
-
-  test('モーダルを閉じるボタンで閉じられる', async ({ page }) => {
-    const cells = page.locator('td.cursor-pointer');
-    await cells.first().click();
-    await expect(page.getByText('授業名')).toBeVisible();
-
-    await page.getByRole('button', { name: '閉じる' }).click();
-    await expect(page.getByText('授業名')).not.toBeVisible();
+  test('凡例が表示される', async ({ page }) => {
+    await expect(page.getByText('専門', { exact: true })).toBeVisible();
+    await expect(page.getByText('数理', { exact: true })).toBeVisible();
+    await expect(page.getByText('現在の授業')).toBeVisible();
   });
 });

@@ -1,0 +1,255 @@
+/*
+ * ChibaTech Portal — デザインシステム基盤
+ *
+ * WHY: Claude Design のハンドオフ (ChibaTech Portal App.dc.html) を実装したもの。
+ * モノクロ(ink/surface)基調・ライト/ダーク対応。設計がインラインstyle + CSS変数
+ * ベースなので、トークンをここに集約し各コンポーネントは var(--*) を参照する。
+ * フォントは next/font で self-host し CSP(font-src 'self') に適合させる。
+ */
+
+:root {
+  --bg: #F3F4F4;
+  --surface: #FFFFFF;
+  --surface-2: #EEEFF0;
+  --glow: #E4E5E6;
+  --ink: #15171A;
+  --ink-2: #565B62;
+  --ink-3: #8C9096;
+  --line: #E4E5E7;
+  --line-2: #D2D4D7;
+  --shadow-sm: 0 1px 2px rgba(10, 12, 15, .06);
+  --shadow-card: 0 2px 6px rgba(10, 12, 15, .05), 0 18px 36px -22px rgba(10, 12, 15, .20);
+  --shadow-nav: 0 -6px 24px rgba(10, 12, 15, .07);
+  /* 時間割「今日」列のハイライト（ink の淡い重ね） */
+  --ttable-today: rgba(21, 23, 26, .07);
+
+  /* next/font が注入する変数を人間可読なエイリアスに束ねる */
+  --font-sans: var(--font-lexend), var(--font-zen), 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', system-ui, sans-serif;
+  --font-jp: var(--font-zen), 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', system-ui, sans-serif;
+  --font-mono: var(--font-mono-raw), ui-monospace, 'SF Mono', monospace;
+
+  /* 設定画面の文字サイズ。ブート時スクリプトが localStorage から上書きする */
+  --ctp-font-scale: 1;
+}
+
+[data-theme="dark"] {
+  --bg: #0B0C0D;
+  --surface: #161719;
+  --surface-2: #1E2022;
+  --glow: #1A1C1E;
+  --ink: #F1F2F0;
+  --ink-2: #A8ABAF;
+  --ink-3: #6D7176;
+  --line: #26282B;
+  --line-2: #34373B;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-card: 0 2px 6px rgba(0, 0, 0, .4), 0 18px 40px -22px rgba(0, 0, 0, .6);
+  --shadow-nav: 0 -6px 24px rgba(0, 0, 0, .45);
+  --ttable-today: rgba(255, 255, 255, .10);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+/* Auth デザインのフォーカスリング（インライン style では :focus を書けないため） */
+.ctp-input:focus {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(127, 127, 127, .22);
+}
+
+/* スクロールバーを隠す（設計のモバイル外観に合わせる） */
+.ctp-scroll {
+  scrollbar-width: none;
+}
+
+.ctp-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.ctp-chips {
+  scrollbar-width: none;
+}
+
+.ctp-chips::-webkit-scrollbar {
+  display: none;
+}
+
+/* 画面遷移アニメーション */
+@keyframes ctp-screen {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ctp-screen {
+  animation: ctp-screen .3s cubic-bezier(.22, 1, .36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctp-screen {
+    animation: none;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────
+ * レスポンシブシェル（App=スマホ / Web=PC）
+ * 同じ画面・データを、幅で下タブ(モバイル) ⇄ サイドバー(デスクトップ)に切替。
+ * どちらも DOM に置き CSS で出し分ける（JSブレークポイント不使用＝SSR安全・FOUCなし）。
+ * ────────────────────────────────────────────────────────── */
+.ctp-shell {
+  min-height: 100dvh;
+  background: radial-gradient(130% 70% at 50% -8%, var(--glow) 0%, var(--bg) 52%);
+}
+
+.ctp-sidebar {
+  display: none;
+}
+
+.ctp-topbar {
+  display: none;
+}
+
+.ctp-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* コンテンツ幅：モバイルは細いカラム、下タブ分の余白を確保 */
+.ctp-content {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 6px 16px calc(84px + env(safe-area-inset-bottom));
+  /* 設定の文字サイズはコンテンツにのみ効かせる（ヘッダー/ナビは固定） */
+  zoom: var(--ctp-font-scale);
+}
+
+@media (min-width: 1024px) {
+  .ctp-shell {
+    display: grid;
+    grid-template-columns: 244px minmax(0, 1fr);
+    background: var(--bg);
+  }
+
+  .ctp-sidebar {
+    display: flex;
+  }
+
+  .ctp-topbar {
+    display: flex;
+  }
+
+  /* モバイル専用要素（ヘッダー・下タブ）はデスクトップで隠す */
+  .ctp-mobile-only {
+    display: none !important;
+  }
+
+  .ctp-content {
+    /* WHY: 右に大きな余白が出ないよう、PCではメインカラム幅いっぱいに広げる（可変幅） */
+    max-width: none;
+    margin: 0;
+    padding: 28px 32px 44px;
+  }
+}
+
+/* ホームのダッシュボード：モバイル1列 → デスクトップ 1.55fr / 1fr */
+.ctp-home-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 1024px) {
+  .ctp-home-grid {
+    grid-template-columns: 1.55fr 1fr;
+    gap: 18px;
+    align-items: start;
+  }
+}
+
+.ctp-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* カード一覧の可変カラム：表示幅で 1列 → 2列 → 3列（最大3列） */
+.ctp-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 768px) {
+  .ctp-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .ctp-cards {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* デスクトップ専用ブロック（App/Web 出し分けの Web 側）。既定は非表示、PC幅で表示。 */
+.ctp-desktop-only {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .ctp-desktop-only {
+    display: block;
+  }
+}
+
+/* キャンパス画面：本文+右カラム（学年歴/バス）をPCで 1.5fr/1fr に */
+.ctp-campus-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .ctp-campus-grid {
+    grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr);
+    gap: 18px;
+  }
+}

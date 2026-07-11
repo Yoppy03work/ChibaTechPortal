@@ -1,5 +1,5 @@
 /**
- * E2E: 設定画面
+ * E2E: 設定画面（リデザイン準拠）
  */
 import { test, expect } from '@playwright/test';
 import { loginAs } from './helpers/auth';
@@ -12,28 +12,31 @@ test.describe('設定', () => {
     await page.goto('/settings');
   });
 
-  test('設定ページのタイトルが表示される', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: '設定' })).toBeVisible();
+  test('表示設定（文字サイズ・テーマ）が表示される', async ({ page }) => {
+    await expect(page.getByText('文字サイズ')).toBeVisible();
+    await expect(page.getByText('テーマ', { exact: true })).toBeVisible();
+    // WHY: ヘッダーのテーマトグル（aria-label「ダークモードに切り替え」）と部分一致しないよう exact
+    await expect(page.getByRole('button', { name: 'ダーク', exact: true })).toBeVisible();
   });
 
-  test('認証情報フォームが表示される', async ({ page }) => {
-    await expect(page.getByText('学内システム認証情報')).toBeVisible();
-    await expect(page.getByText('AES-256-GCM')).toBeVisible();
-    await expect(page.getByText('CIT Portal ユーザーID')).toBeVisible();
-    await expect(page.getByText('manaba ユーザーID')).toBeVisible();
+  test('テーマをダークに切り替えられる', async ({ page }) => {
+    await page.getByRole('button', { name: 'ダーク', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await page.getByRole('button', { name: 'ライト', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  });
+
+  test('外部サービス認証フォームが表示される', async ({ page }) => {
+    await expect(page.getByText('外部サービス認証')).toBeVisible();
+    await expect(page.getByText('AES-256-GCM', { exact: false })).toBeVisible();
+    await expect(page.getByText(/CIT Portal ID/)).toBeVisible();
+    await expect(page.getByText(/manaba ID/)).toBeVisible();
     await expect(page.getByRole('button', { name: '認証情報を保存' })).toBeVisible();
   });
 
   test('通知設定セクションが表示される', async ({ page }) => {
-    // WHY: 見出しでピン留め（他箇所のテキスト一致を避ける）
-    await expect(page.getByRole('heading', { name: '通知設定' })).toBeVisible();
-    // WHY: 説明文「ブラウザにPush通知を送信」にも「Push通知」が含まれるため exact で限定
-    await expect(page.getByText('Push通知', { exact: true })).toBeVisible();
-    await expect(page.getByText('メール通知', { exact: true })).toBeVisible();
-  });
-
-  test('ログアウトボタンが表示される', async ({ page }) => {
-    await expect(page.getByRole('button', { name: 'ログアウト' })).toBeVisible();
+    await expect(page.getByText('プッシュ通知', { exact: true })).toBeVisible();
+    await expect(page.getByText('メール転送', { exact: true })).toBeVisible();
   });
 
   test('認証情報を入力できる', async ({ page }) => {
