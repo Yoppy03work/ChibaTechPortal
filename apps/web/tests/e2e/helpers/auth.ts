@@ -18,7 +18,7 @@ export async function loginAs(
   }
 
   await page.goto('/login');
-  await page.getByLabel('学籍番号').fill(studentId);
+  await page.getByLabel('MARINE User ID').fill(studentId);
   await page.getByLabel('パスワード').fill(password);
   await page.getByRole('button', { name: 'ログイン' }).click();
   // WHY: window.location.href='/' でダッシュボードに遷移するまで待つ
