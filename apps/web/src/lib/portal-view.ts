@@ -63,9 +63,37 @@ export function assignStyle(st: AssignmentStatus): AssignStyle {
   return { cardBg: 'var(--surface)', cardBorder: 'var(--line)', titleColor: 'var(--ink)', metaColor: 'var(--ink-3)', subColor: 'var(--ink-3)', badgeLabel: '提出済', badgeBg: 'transparent', badgeFg: 'var(--ink)', badgeBorder: 'var(--ink-2)', actBg: 'transparent', actFg: 'var(--ink)' };
 }
 
-/* ── 授業カテゴリ風の濃淡（実データにはカテゴリが無いため名前ハッシュで安定配色） ── */
-export function classTier(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return ['var(--ink)', 'var(--ink-2)', 'var(--ink-3)'][h % 3];
+/* ── 授業カテゴリ（専門/教養 × 必修/選択）の分類と識別色 ─────────────
+ * WHY: Syllabus.category は「専門科目 必修」等の自由テキストのため部分一致で分類する。
+ * モノクロトークンの濃淡4段で表現（濃=専門必修 → 淡=教養選択）。未分類（シラバス
+ * 未取得等）はバー無し。 */
+export type CourseCategoryKey = 'senmon-hisshu' | 'senmon-sentaku' | 'kyoyo-hisshu' | 'kyoyo-sentaku' | 'unknown';
+
+export function classifyCategory(cat: string | null | undefined): CourseCategoryKey {
+  if (!cat) return 'unknown';
+  const major = /専門/.test(cat) ? 'senmon' : /教養|共通|基礎|人文|社会|語学|外国語|体育|健康/.test(cat) ? 'kyoyo' : null;
+  if (!major) return 'unknown';
+  // WHY: 「必修」明記のみ必修扱い。それ以外（選択/選択必修/無印）は選択側に倒す
+  const req = /必修/.test(cat) && !/選択必修/.test(cat) ? 'hisshu' : 'sentaku';
+  return `${major}-${req}` as CourseCategoryKey;
 }
+
+export const CATEGORY_BAR: Record<CourseCategoryKey, string> = {
+  'senmon-hisshu': 'var(--ink)',
+  'senmon-sentaku': 'var(--ink-2)',
+  'kyoyo-hisshu': 'var(--ink-3)',
+  'kyoyo-sentaku': 'var(--line-2)',
+  unknown: 'transparent',
+};
+
+export function categoryBar(cat: string | null | undefined): string {
+  return CATEGORY_BAR[classifyCategory(cat)];
+}
+
+/** 時間割の凡例表示用 */
+export const CATEGORY_LEGEND: { key: CourseCategoryKey; label: string }[] = [
+  { key: 'senmon-hisshu', label: '専門・必修' },
+  { key: 'senmon-sentaku', label: '専門・選択' },
+  { key: 'kyoyo-hisshu', label: '教養・必修' },
+  { key: 'kyoyo-sentaku', label: '教養・選択' },
+];
