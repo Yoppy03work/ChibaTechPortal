@@ -9,7 +9,7 @@ import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { getJstParts, PERIOD_START_TIMES, PERIOD_MINUTES } from '@chibatech/shared';
 import { getWeekGrid, periodList } from '@/lib/portal-data';
-import { classTier } from '@/lib/portal-view';
+import { categoryBar, CATEGORY_BAR, CATEGORY_LEGEND } from '@/lib/portal-view';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,12 +71,12 @@ export default async function TimetablePage() {
               const fg = !c ? 'var(--ink-3)' : now ? 'var(--surface)' : 'var(--ink)';
               const border = !c ? '1px dashed var(--line)' : now ? '1px solid var(--ink)' : '1px solid var(--line)';
               const ring = now ? '0 8px 18px -8px rgba(0,0,0,.45)' : 'none';
-              const bar = !c || now ? 'transparent' : classTier(c.name);
+              const bar = !c || now ? 'transparent' : categoryBar(c.category);
               return (
                 <div key={di} style={{ position: 'relative', height: 60, borderRadius: 8, padding: '5px 4px 5px 8px', background: bg, color: fg, border, boxShadow: ring, overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2 }}>
                   <span style={{ position: 'absolute', left: 3, top: 6, bottom: 6, width: 2.5, borderRadius: 2, background: bar }} />
                   <div style={{ fontSize: 8, fontWeight: 700, lineHeight: 1.15, overflow: 'hidden' }}>{c?.name ?? ''}</div>
-                  <div style={{ fontSize: 7, opacity: 0.72, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c?.room ?? ''}</div>
+                  <div style={{ fontSize: 7, opacity: 0.72, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c ? [c.room, c.teacher].filter(Boolean).join(' · ') : ''}</div>
                 </div>
               );
             })}
@@ -90,13 +90,19 @@ export default async function TimetablePage() {
         )}
       </div>
 
-      {/* 凡例 */}
+      {/* 凡例: 左バーの濃淡 = 専門/教養 × 必修/選択 */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px 18px', padding: '0 4px' }}>
+        {CATEGORY_LEGEND.map((l) => (
+          <span key={l.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--ink-2)' }}>
+            <span style={{ width: 4, height: 14, borderRadius: 2, background: CATEGORY_BAR[l.key] }} />
+            {l.label}
+          </span>
+        ))}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--ink-2)' }}>
           <span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--ink)', boxShadow: '0 0 0 2px var(--ink)' }} />
           現在の授業
         </span>
-        <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>左バーの濃淡は科目ごとの識別色</span>
+        <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>バー無し＝シラバス未取得（区分不明）</span>
       </div>
     </div>
   );

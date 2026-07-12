@@ -83,17 +83,29 @@ export async function getTodayClasses(userId: string, now = new Date()): Promise
 export interface WeekCell {
   name: string;
   room: string;
+  /** 担当教員（Syllabus 由来。未取得なら空文字） */
+  teacher: string;
+  /** 科目区分の自由テキスト（Syllabus.category。分類は portal-view.classifyCategory） */
+  category: string | null;
 }
 
 export async function getWeekGrid(userId: string): Promise<{ grid: (WeekCell | null)[][]; maxPeriod: number }> {
-  const rows = await prisma.timetable.findMany({ where: { userId } });
+  const rows = await prisma.timetable.findMany({
+    where: { userId },
+    include: { syllabus: { select: { instructor: true, category: true } } },
+  });
   // WHY: 10限制。データに存在する最大時限まで表示（最低5限は常に見せる）
   const maxPeriod = Math.min(10, Math.max(5, ...rows.map((r) => r.period), 5));
   // grid[day(月=0..土=5)][period-1]
   const grid: (WeekCell | null)[][] = Array.from({ length: 6 }, () => Array<WeekCell | null>(maxPeriod).fill(null));
   for (const r of rows) {
     if (r.dayOfWeek >= 1 && r.dayOfWeek <= 6 && r.period >= 1 && r.period <= maxPeriod) {
-      grid[r.dayOfWeek - 1][r.period - 1] = { name: r.className, room: r.room ?? '' };
+      grid[r.dayOfWeek - 1][r.period - 1] = {
+        name: r.className,
+        room: r.room ?? '',
+        teacher: r.syllabus?.instructor ?? '',
+        category: r.syllabus?.category ?? null,
+      };
     }
   }
   return { grid, maxPeriod };
