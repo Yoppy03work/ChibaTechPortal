@@ -146,6 +146,8 @@ export {
   CONFIRM_METHOD,
 } from './lib/attendance-confirm-guard';
 
+export { blockRowIds, type ClassPeriodRow } from './lib/attendance-blocks';
+
 export {
   PERIOD_START_TIMES,
   PERIOD_MINUTES,
