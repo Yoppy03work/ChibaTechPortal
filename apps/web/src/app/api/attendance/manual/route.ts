@@ -76,24 +76,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Not today\'s class' }, { status: 400 });
   }
 
-  // 6. 記録（unique 制約で二重登録を冪等に吸収）
+  // 6. 記録（unique 制約で二重登録を冪等に吸収）。
+  // WHY: 同じ日の同名授業（連続コマ）は1回の出席で全コマぶん出席扱い（実運用の仕様）。
+  // 対象行と同名・同曜日の全行にまとめて記録する。
   const classDate = new Date(formatJstYmd(now));
-  try {
-    await prisma.attendanceLog.create({
-      data: {
-        userId,
-        timetableId: timetable.id,
-        classDate,
-        status: 'success',
-        method: 'manual',
-      },
-    });
-    return NextResponse.json({ ok: true });
-  } catch (e: unknown) {
-    // P2002 = unique violation（既に記録済み）
-    if (typeof e === 'object' && e !== null && 'code' in e && (e as { code?: string }).code === 'P2002') {
-      return NextResponse.json({ ok: true, already: true });
+  const sameClassRows = await prisma.timetable.findMany({
+    where: { userId, dayOfWeek: timetable.dayOfWeek, className: timetable.className },
+    select: { id: true },
+  });
+  const markedIds: string[] = [];
+  for (const row of sameClassRows) {
+    try {
+      await prisma.attendanceLog.create({
+        data: {
+          userId,
+          timetableId: row.id,
+          classDate,
+          status: 'success',
+          method: 'manual',
+        },
+      });
+      markedIds.push(row.id);
+    } catch (e: unknown) {
+      // P2002 = unique violation（既に記録済み）→ 冪等に成功扱い
+      if (typeof e === 'object' && e !== null && 'code' in e && (e as { code?: string }).code === 'P2002') {
+        markedIds.push(row.id);
+        continue;
+      }
+      throw e;
     }
-    throw e;
   }
+  return NextResponse.json({ ok: true, markedIds });
 }

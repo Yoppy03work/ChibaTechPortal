@@ -272,12 +272,21 @@ export async function getAttendanceOverview(userId: string, days = 120): Promise
   };
 }
 
-/** 今日すでに出席記録(success)がある timetableId 一覧 */
+/** 今日すでに出席記録(success)がある timetableId 一覧。
+ * WHY: 同じ日の同名授業（連続コマ）は1回の出席で全コマ出席扱いのため、
+ * 出席済みの科目名と同名の今日の全行を出席済みとして返す。 */
 export async function getTodayAttendedIds(userId: string, now = new Date()): Promise<string[]> {
   const classDate = new Date(formatJstYmd(now));
   const logs = await prisma.attendanceLog.findMany({
     where: { userId, classDate, status: 'success' },
-    select: { timetableId: true },
+    select: { timetableId: true, timetable: { select: { className: true } } },
   });
-  return [...new Set(logs.map((l) => l.timetableId))];
+  if (logs.length === 0) return [];
+  const attendedNames = [...new Set(logs.map((l) => l.timetable.className))];
+  const jst = getJstParts(now);
+  const rows = await prisma.timetable.findMany({
+    where: { userId, dayOfWeek: jst.dayOfWeek, className: { in: attendedNames } },
+    select: { id: true },
+  });
+  return [...new Set([...logs.map((l) => l.timetableId), ...rows.map((r) => r.id)])];
 }

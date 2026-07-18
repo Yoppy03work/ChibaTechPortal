@@ -26,7 +26,14 @@ export function ManualAttendance({ classes, attendedIds }: { classes: TodayClass
         body: JSON.stringify({ timetableId }),
       });
       if (res.ok) {
-        setMarked((m) => new Set(m).add(timetableId));
+        // WHY: 同名授業（連続コマ）はまとめて出席扱いになるため、API が返す
+        // markedIds 全部を出席済みにする
+        const data = (await res.json().catch(() => ({}))) as { markedIds?: string[] };
+        setMarked((m) => {
+          const next = new Set(m);
+          for (const id of data.markedIds ?? [timetableId]) next.add(id);
+          return next;
+        });
       } else {
         const data = await res.json().catch(() => ({}));
         setError(data?.error === 'Too many requests' ? '試行が多すぎます。しばらく待ってください。' : '記録に失敗しました。もう一度お試しください。');

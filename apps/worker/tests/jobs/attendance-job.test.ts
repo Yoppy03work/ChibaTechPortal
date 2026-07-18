@@ -503,17 +503,37 @@ describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
     );
   });
 
-  it('セッションが別の timetableId に紐付いていれば adapter は呼ばれない', async () => {
+  it('セッションが別授業（同名でない）の timetableId に紐付いていれば adapter は呼ばれない', async () => {
     enableAuto();
     timetableFindUnique.mockResolvedValue(timetableRow());
     attendanceQrSessionFindUnique.mockResolvedValue({
       ...validSession(),
       timetableId: 'other-tt',
+      timetable: { className: '別の授業' },
     });
     const adapter = makeAdapter();
 
     await processAttendanceJob({ id: 'a6', data: validJobData() }, adapter);
 
     expect(adapter.attend).not.toHaveBeenCalled();
+  });
+
+  it('別コマの timetableId でも同名授業のセッションなら attend が呼ばれる（連続コマのQR共有）', async () => {
+    // WHY: 同じ日の同名授業（連続コマ）は同じ出席QRが有効という実運用仕様。
+    // 1コマ目のスキャンで作られたセッション（timetableId=1コマ目）を、
+    // 2コマ目のジョブ（tt-1）でも共有できることを固定する。
+    enableAuto();
+    timetableFindUnique.mockResolvedValue(timetableRow());
+    attendanceQrSessionFindUnique.mockResolvedValue({
+      ...validSession(),
+      timetableId: 'other-period-tt',
+      timetable: { className: 'プログラミング' },
+    });
+    const adapter = makeAdapter();
+
+    await processAttendanceJob({ id: 'a7', data: validJobData() }, adapter);
+
+    expect(adapter.healthCheck).toHaveBeenCalled();
+    expect(adapter.attend).toHaveBeenCalledTimes(1);
   });
 });

@@ -24,8 +24,11 @@ import { rateLimiter } from '@/lib/rate-limiter';
 
 export const dynamic = 'force-dynamic';
 
-// WHY: スキャンから auto 送信（授業開始前後）までをカバーする短命 TTL。
-const QR_SESSION_TTL_MS = 30 * 60 * 1000;
+// WHY: 同じ日の同名授業（連続コマ、最大3コマの実験等）は同じ出席QRが有効なため、
+// スキャンから後続コマの auto 送信ウィンドウ（+2時間程度）までをカバーする TTL にする。
+// 送信自体は各コマの「開始5分前±2分」ウィンドウでのみ許可されるので、TTL 延長で
+// 任意時刻に送信できるようになるわけではない。
+const QR_SESSION_TTL_MS = 150 * 60 * 1000;
 
 export async function POST(request: Request) {
   // 1. CSRF / Origin / Content-Type ガード
