@@ -389,6 +389,7 @@ interface MethodGuardInput {
     dayOfWeek: number;
     period: number;
     room: string | null;
+    className: string;
     user: {
       // WHY: Prisma Bytes は Uint8Array として型付けされる。Buffer は Uint8Array の
       // サブクラスなので、汎用に Uint8Array で受ける
@@ -432,6 +433,9 @@ async function evaluateAutoMethodGuard(
         classDate: sessionClassDate,
       },
     },
+    // WHY: 同じ日の同名授業（連続コマ）は同じ出席QRが有効（実運用で確認 2026-07-18）。
+    // セッションが別コマの行に紐付いていても、同名授業なら共有できるよう className を引く。
+    include: { timetable: { select: { className: true } } },
   });
   const qrSessionValid =
     !!session &&
@@ -439,7 +443,10 @@ async function evaluateAutoMethodGuard(
     // WHY: session.roomId は QR 由来 (出席システム "7301")、timetable.room は UNIPA
     // 表記 ("731講義室")。CIT 規則 (7 始まり 3 桁に 0 挿入) を加味して突合する。
     attendanceRoomMatches(input.timetable.room, session.roomId) &&
-    (session.timetableId == null || session.timetableId === input.timetable.id);
+    (session.timetableId == null ||
+      session.timetableId === input.timetable.id ||
+      // WHY: 連続コマ（同じ日・同名授業）はスキャン1回のセッションを共有する
+      session.timetable?.className === input.timetable.className);
 
   // pre-network: DB / 内部状態だけで判定。reject 時は adapter に触れない
   const guardInput: AttendanceAutoGuardPreNetworkInput = {
