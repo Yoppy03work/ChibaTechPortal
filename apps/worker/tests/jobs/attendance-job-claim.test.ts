@@ -35,7 +35,7 @@ const attendanceAuditLogCreate = vi.fn();
 const attendanceAuditLogFindFirst = vi.fn();
 vi.mock('@chibatech/db', () => ({
   prisma: {
-    timetable: { findUnique: (...a: unknown[]) => timetableFindUnique(...a) },
+    timetable: { findUnique: (...a: unknown[]) => timetableFindUnique(...a), findMany: async () => [] },
     attendanceLog: {
       findFirst: (...a: unknown[]) => attendanceLogFindFirst(...a),
       findUnique: (...a: unknown[]) => attendanceLogFindUnique(...a),

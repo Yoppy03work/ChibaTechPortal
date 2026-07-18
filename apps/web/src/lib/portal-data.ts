@@ -6,7 +6,7 @@
  * classDate は「JST の YYYY-MM-DD を UTC midnight で保存」する既存規約に従う。
  */
 import { prisma } from '@chibatech/db';
-import { PERIOD_START_TIMES, PERIOD_MINUTES, getJstParts, formatJstYmd } from '@chibatech/shared';
+import { PERIOD_START_TIMES, PERIOD_MINUTES, getJstParts, formatJstYmd, blockRowIds } from '@chibatech/shared';
 import type { Channel, AssignmentStatus } from './portal-view';
 import { CHANNEL_LABEL } from './portal-view';
 
@@ -273,20 +273,26 @@ export async function getAttendanceOverview(userId: string, days = 120): Promise
 }
 
 /** 今日すでに出席記録(success)がある timetableId 一覧。
- * WHY: 同じ日の同名授業（連続コマ）は1回の出席で全コマ出席扱いのため、
- * 出席済みの科目名と同名の今日の全行を出席済みとして返す。 */
+ * WHY: 連続する同名授業（ブロック）は出席1回で全コマ出席扱いのため、
+ * 出席済み行が属する連続ブロックの全行を出席済みとして返す。
+ * 補講（非連続の同名授業）は別ブロックなので展開されない。 */
 export async function getTodayAttendedIds(userId: string, now = new Date()): Promise<string[]> {
   const classDate = new Date(formatJstYmd(now));
-  const logs = await prisma.attendanceLog.findMany({
-    where: { userId, classDate, status: 'success' },
-    select: { timetableId: true, timetable: { select: { className: true } } },
-  });
-  if (logs.length === 0) return [];
-  const attendedNames = [...new Set(logs.map((l) => l.timetable.className))];
   const jst = getJstParts(now);
-  const rows = await prisma.timetable.findMany({
-    where: { userId, dayOfWeek: jst.dayOfWeek, className: { in: attendedNames } },
-    select: { id: true },
-  });
-  return [...new Set([...logs.map((l) => l.timetableId), ...rows.map((r) => r.id)])];
+  const [logs, dayRows] = await Promise.all([
+    prisma.attendanceLog.findMany({
+      where: { userId, classDate, status: 'success' },
+      select: { timetableId: true },
+    }),
+    prisma.timetable.findMany({
+      where: { userId, dayOfWeek: jst.dayOfWeek },
+      select: { id: true, className: true, period: true },
+    }),
+  ]);
+  if (logs.length === 0) return [];
+  const ids = new Set<string>();
+  for (const l of logs) {
+    for (const id of blockRowIds(dayRows, l.timetableId)) ids.add(id);
+  }
+  return [...ids];
 }

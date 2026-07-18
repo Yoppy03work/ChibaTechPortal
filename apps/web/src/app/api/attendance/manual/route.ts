@@ -13,7 +13,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { prisma } from '@chibatech/db';
-import { RATE_LIMITS, formatJstYmd, getJstParts } from '@chibatech/shared';
+import { RATE_LIMITS, blockRowIds, formatJstYmd, getJstParts } from '@chibatech/shared';
 import { validateStateChangingRequest } from '@/lib/api-guard';
 import { rateLimiter } from '@/lib/rate-limiter';
 
@@ -77,15 +77,17 @@ export async function POST(request: Request) {
   }
 
   // 6. 記録（unique 制約で二重登録を冪等に吸収）。
-  // WHY: 同じ日の同名授業（連続コマ）は1回の出席で全コマぶん出席扱い（実運用の仕様）。
-  // 対象行と同名・同曜日の全行にまとめて記録する。
+  // WHY: 連続する同名授業（ブロック）は出席1回で全コマぶん出席扱い。ただし
+  // 補講（同じ日の非連続の同名授業）は別ブロックで、改めて出席が必要なため、
+  // 対象行が属する「連続ブロック」の行だけにまとめて記録する。
   const classDate = new Date(formatJstYmd(now));
-  const sameClassRows = await prisma.timetable.findMany({
-    where: { userId, dayOfWeek: timetable.dayOfWeek, className: timetable.className },
-    select: { id: true },
+  const dayRows = await prisma.timetable.findMany({
+    where: { userId, dayOfWeek: timetable.dayOfWeek },
+    select: { id: true, className: true, period: true },
   });
+  const blockIds = blockRowIds(dayRows, timetable.id);
   const markedIds: string[] = [];
-  for (const row of sameClassRows) {
+  for (const row of blockIds.map((id) => ({ id }))) {
     try {
       await prisma.attendanceLog.create({
         data: {

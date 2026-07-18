@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@chibatech/db';
 import {
+  blockRowIds,
   confirmSubmitInputSchema,
   evaluateConfirmSubmitGuard,
   ATTENDANCE_JOB_NAME,
@@ -78,7 +79,7 @@ export async function POST(request: Request) {
   const classDateObj = new Date(classDate);
 
   // 4. timetable と重複ログを DB 取得 (外部アクセスなし)
-  const [timetable, existingSuccess] = await Promise.all([
+  const [timetable] = await Promise.all([
     prisma.timetable.findUnique({
       where: { id: timetableId },
       select: {
@@ -99,24 +100,30 @@ export async function POST(request: Request) {
         },
       },
     }),
-    prisma.attendanceLog.findFirst({
-      where: {
-        userId,
-        timetableId,
-        // WHY: classDate は @db.Date。`new Date('YYYY-MM-DD')`(classDateObj) は UTC
-        // midnight で、worker が永続化する値と同規約。host TZ 依存の toClassDate は
-        // 使わない (TZ=Asia/Tokyo で前日にズレ、dedup が worker とミスマッチするため)。
-        classDate: classDateObj,
-        status: 'success',
-      },
-      select: { id: true },
-    }),
   ]);
 
   if (!timetable) {
     // WHY: 存在しない timetableId への問い合わせは情報を返さず汎用 400 で返す
     return NextResponse.json({ error: 'Invalid timetable' }, { status: 400 });
   }
+
+  // WHY: 連続する同名授業（ブロック）は出席登録1回でよいため、重複判定は
+  // ブロック内のどの行の success も対象にする。補講（非連続の同名授業）は
+  // 別ブロックなので改めて送信できる。classDate は @db.Date。
+  // `new Date('YYYY-MM-DD')`(classDateObj) は UTC midnight で worker と同規約。
+  const dayRows = await prisma.timetable.findMany({
+    where: { userId, dayOfWeek: timetable.dayOfWeek },
+    select: { id: true, className: true, period: true },
+  });
+  const existingSuccess = await prisma.attendanceLog.findFirst({
+    where: {
+      userId,
+      timetableId: { in: blockRowIds(dayRows, timetableId) },
+      classDate: classDateObj,
+      status: 'success',
+    },
+    select: { id: true },
+  });
 
   // 5. confirm-guard (サーバー側検証) — ownership/room/date/time/duplicate/creds
   // WHY: フロントの ConfirmFlow と Worker 入口、本ハンドラの 3 箇所で同じ判定を

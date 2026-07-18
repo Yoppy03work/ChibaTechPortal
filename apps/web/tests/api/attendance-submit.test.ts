@@ -22,6 +22,8 @@ vi.mock('@chibatech/db', () => ({
   prisma: {
     timetable: {
       findUnique: (...args: unknown[]) => timetableFindUnique(...args),
+      // WHY: ブロック判定用の同日行取得。既定 [] → blockRowIds は対象行のみに縮退
+      findMany: async () => [],
     },
     attendanceLog: {
       findFirst: (...args: unknown[]) => attendanceLogFindFirst(...args),

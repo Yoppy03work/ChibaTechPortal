@@ -33,6 +33,7 @@ import {
   formatJstYmd,
   toAttendanceAuditLogCreateData,
   attendanceRoomMatches,
+  blockRowIds,
   ATTENDANCE_QUEUE_NAME as SHARED_ATTENDANCE_QUEUE_NAME,
 } from '@chibatech/shared';
 import type {
@@ -160,11 +161,20 @@ export async function processAttendanceJob(
   }
   const displayClassName = sanitizeExternalText(timetable.className);
 
-  // 3. 同日同方式の成功ログ重複を確認 (DB のみ)
+  // 3. 成功ログ重複を「連続コマブロック」単位で確認 (DB のみ)。
+  // WHY: 連続する同名授業は出席登録1回でよい（ブロック先頭で送信済みなら
+  // 後続コマは already_submitted で skip）。補講＝同じ日の非連続ブロックは
+  // 別ブロックになるため、そのブロック開始時に改めて送信される。
+  // ブロック先頭の送信が failed だった場合は後続コマで自然に再試行される。
+  const dayRows = await prisma.timetable.findMany({
+    where: { userId, dayOfWeek: timetable.dayOfWeek },
+    select: { id: true, className: true, period: true },
+  });
+  const blockIds = blockRowIds(dayRows, timetableId);
   const existingSuccess = await prisma.attendanceLog.findFirst({
     where: {
       userId,
-      timetableId,
+      timetableId: { in: blockIds },
       classDate,
       status: 'success',
     },
