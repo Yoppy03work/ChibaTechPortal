@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AttendanceHttpAdapter } from '../../src/scrapers/adapters/attendance-http';
 
-const BASE = 'https://attendance.is.it-chiba.ac.jp';
+const BASE = 'https://attendance.is.chibatech.ac.jp';
 
 const LOGIN_HTML =
   '<form action="/attendance/login" method="post"><input type="hidden" name="_csrf" value="csrf-login"><input name="username"><input name="password" type="password"></form>';
