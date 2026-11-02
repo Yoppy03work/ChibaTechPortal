@@ -10,17 +10,17 @@
 const TARGETS = [
   {
     name: '出席システム',
-    url: 'https://attendance.is.it-chiba.ac.jp/attendance/qr_again',
+    url: 'https://attendance.is.chibatech.ac.jp/attendance/qr_again',
     critical: true,
   },
   {
     name: '出席システム (トップ)',
-    url: 'https://attendance.is.it-chiba.ac.jp/',
+    url: 'https://attendance.is.chibatech.ac.jp/',
     critical: true,
   },
   {
     name: 'CIT Portal',
-    url: 'https://portal.it-chiba.ac.jp/uprx/',
+    url: 'https://portal.chibatech.ac.jp/uprx/',
     critical: false,
   },
   {
@@ -105,14 +105,14 @@ async function getNetworkInfo() {
   // DNS解決テスト
   const dns = await import('node:dns').then(m => m.promises);
   try {
-    const addrs = await dns.resolve4('attendance.is.it-chiba.ac.jp');
+    const addrs = await dns.resolve4('attendance.is.chibatech.ac.jp');
     console.log(`出席システムIP: ${addrs.join(', ')}`);
   } catch (err) {
     console.log(`出席システムDNS: 解決失敗 (${err instanceof Error ? err.message : err})`);
   }
 
   try {
-    const addrs = await dns.resolve4('portal.it-chiba.ac.jp');
+    const addrs = await dns.resolve4('portal.chibatech.ac.jp');
     console.log(`CIT Portal IP: ${addrs.join(', ')}`);
   } catch {
     console.log('CIT Portal DNS: 解決失敗');

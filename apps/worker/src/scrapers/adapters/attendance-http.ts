@@ -8,9 +8,11 @@
  *   ② GET  /attendance/class_room/{roomId} → 出席確認画面 (その教室の現授業)
  *   ③ POST /attendance/attend (_csrf のみ) → 「出席済みにしました」
  *
- * ホスト: TLS 証明書は `attendance.is.it-chiba.ac.jp` 用 (旧ドメイン)。新ドメイン
- *   `chibatech.ac.jp` は同一サーバ(10.64.40.1)だが cert altname 不一致で Node fetch が
- *   ERR_TLS_CERT_ALTNAME_INVALID で失敗するため、既定は it-chiba を使う。
+ * ホスト: 旧ドメイン `attendance.is.it-chiba.ac.jp` と新ドメイン
+ *   `attendance.is.chibatech.ac.jp` は同一サーバ(10.64.40.1)。TLS 証明書は 2026-11-02
+ *   の実機確認時点で chibatech 側にのみ有効で、it-chiba は cert altname 不一致により
+ *   ERR_TLS_CERT_ALTNAME_INVALID で Node fetch が失敗する(以前は逆だった)。
+ *   このため既定は chibatech を使う。
  * creds: ポータル SSO と同じ学籍番号+パスワード (出席システムは SSO でなくローカルフォーム)。
  *
  * 状態判定は always-present なモーダルテンプレ (completeModal/errorModal) ではなく、
@@ -21,10 +23,10 @@ import * as cheerio from 'cheerio';
 import type { AttendanceResult, AttendanceAdapter } from '@chibatech/shared';
 import { ScraperLoginError, ScraperError } from '@chibatech/shared';
 
-// WHY: 既定は本番 CIT 出席システム (cert 有効な it-chiba ホスト)。ローカル検証で stub へ
+// WHY: 既定は本番 CIT 出席システム (cert 有効な chibatech ホスト)。ローカル検証で stub へ
 // 向けたい場合のみ ATTENDANCE_BASE_URL で上書きする (production は未設定 → 既定のまま)。
 const BASE_URL =
-  process.env.ATTENDANCE_BASE_URL ?? 'https://attendance.is.it-chiba.ac.jp';
+  process.env.ATTENDANCE_BASE_URL ?? 'https://attendance.is.chibatech.ac.jp';
 const ORIGIN = (() => {
   try {
     return new URL(BASE_URL).origin;
