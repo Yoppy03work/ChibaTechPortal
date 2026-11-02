@@ -111,6 +111,12 @@ export {
 } from './lib/attendance-settings';
 
 export {
+  isAutoDevCodeConfigured,
+  verifyAutoDevCode,
+  isAutoDryRun,
+} from './lib/attendance-rollout';
+
+export {
   type AttendanceAutoGuardInput,
   type AttendanceAutoGuardPreNetworkInput,
   type AttendanceAutoGuardResult,

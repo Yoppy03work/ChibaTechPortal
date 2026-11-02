@@ -1,8 +1,9 @@
 /**
- * scheduler の auto enqueue ゲートのテスト (M2-D)
+ * scheduler の auto enqueue ゲートのテスト (dev-code 方式)
  *
- * WHY: auto は最高リスク。Scheduler は enabled + allowlisted + 有効 QR セッションが
- * 揃ったときだけ auto ジョブを enqueue する (fail-closed)。既定では何も投入しない。
+ * WHY: auto は最高リスク。Scheduler は「ユーザーが開発者コードで解禁済み
+ * (attendanceSettings.autoUnlocked=true) + mode=auto + 有効 QR セッション」が揃った
+ * ときだけ auto ジョブを enqueue する (fail-closed)。未解禁では何も投入しない。
  * Worker が最終ゲートだが、Scheduler 側の gate も固定する。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -28,7 +29,7 @@ import { enqueueAttendanceJobs } from '../../src/jobs/scheduler';
 
 const IN_WINDOW = new Date('2026-05-04T08:55:00+09:00'); // 月曜 1限(9:00) -5分
 
-function ttRow() {
+function ttRow(attendanceSettings: unknown = { mode: 'auto', autoUnlocked: true }) {
   return {
     id: 'tt-1',
     userId: 'user-1',
@@ -36,7 +37,7 @@ function ttRow() {
     className: 'プログラミング',
     user: {
       encryptedCitCreds: Buffer.from('x'),
-      attendanceSettings: { mode: 'auto' },
+      attendanceSettings,
     },
   };
 }
@@ -48,27 +49,22 @@ beforeEach(() => {
   qrSessionFindFirst.mockReset();
   timetableFindMany.mockResolvedValue([ttRow()]);
   qrSessionFindFirst.mockResolvedValue({ id: 'qs-1' });
-  delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
-  delete process.env.ATTENDANCE_AUTO_ALLOWLIST;
   vi.useFakeTimers();
   vi.setSystemTime(IN_WINDOW);
 });
 
 afterEach(() => {
   vi.useRealTimers();
-  delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
-  delete process.env.ATTENDANCE_AUTO_ALLOWLIST;
 });
 
 describe('enqueueAttendanceJobs — auto enqueue ゲート', () => {
-  it('既定 (フラグ無し) では何も enqueue しない', async () => {
+  it('mode=auto でも未解禁 (autoUnlocked=false) なら何も enqueue しない', async () => {
+    timetableFindMany.mockResolvedValue([ttRow({ mode: 'auto', autoUnlocked: false })]);
     await enqueueAttendanceJobs();
     expect(attendanceAdd).not.toHaveBeenCalled();
   });
 
-  it('enabled + allowlisted + 有効セッション なら auto を enqueue する', async () => {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
-    process.env.ATTENDANCE_AUTO_ALLOWLIST = 'user-1';
+  it('autoUnlocked=true + 有効セッション なら auto を enqueue する', async () => {
     await enqueueAttendanceJobs();
 
     expect(attendanceAdd).toHaveBeenCalledTimes(1);
@@ -78,16 +74,13 @@ describe('enqueueAttendanceJobs — auto enqueue ゲート', () => {
     expect((opts as { jobId: string }).jobId).toBe('auto-user-1-tt-1-2026-05-04');
   });
 
-  it('enabled だが allowlist 外なら enqueue しない', async () => {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
-    process.env.ATTENDANCE_AUTO_ALLOWLIST = 'other-user';
+  it('mode が auto でなければ (confirm) enqueue しない', async () => {
+    timetableFindMany.mockResolvedValue([ttRow({ mode: 'confirm', autoUnlocked: true })]);
     await enqueueAttendanceJobs();
     expect(attendanceAdd).not.toHaveBeenCalled();
   });
 
-  it('enabled + allowlisted でも有効セッション無しなら enqueue しない', async () => {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
-    process.env.ATTENDANCE_AUTO_ALLOWLIST = 'user-1';
+  it('autoUnlocked=true でも有効セッション無しなら enqueue しない', async () => {
     qrSessionFindFirst.mockResolvedValue(null);
     await enqueueAttendanceJobs();
     expect(attendanceAdd).not.toHaveBeenCalled();

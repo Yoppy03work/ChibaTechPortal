@@ -15,7 +15,6 @@ import {
 import { scrapeQueue } from './scrape-job';
 import { attendanceQueue } from './attendance-job';
 import { notifyQueue } from './notify-job';
-import { isAutoExecutionEnabled, isUserAllowlisted } from '../lib/attendance-rollout';
 import {
   isCitTimetableSyncEnabled,
   isCitNotificationsSyncEnabled,
@@ -64,7 +63,7 @@ function randomJitter(): number {
 export async function enqueueScrapeJobs() {
   // WHY: スクレイピングは SCRAPE_ENABLED=true のときのみ実行する。既定（未設定/false）は
   // 外部アクセスしない。startScheduler でも gate するが、stray な呼び出しを防ぐ
-  // 多層防御としてここでも弾く（ATTENDANCE_AUTO_EXECUTION_ENABLED と同じ思想）。
+  // 多層防御としてここでも弾く（fail-closed 既定オフの思想は auto 解禁と同じ）。
   if (process.env.SCRAPE_ENABLED !== 'true') return;
   if (!isActiveHour()) return;
 
@@ -152,12 +151,13 @@ export async function enqueueAttendanceJobs() {
 
     for (const tt of timetables) {
       // WHY: Scheduler 投入対象は auto のみ。confirm/manual は UI 側で完結。
-      const { mode } = normalizeAttendanceSettings(tt.user.attendanceSettings);
+      const { mode, autoUnlocked } = normalizeAttendanceSettings(tt.user.attendanceSettings);
       if (mode !== 'auto') continue;
 
-      // 段階解禁フラグ (fail-closed)。既定では何も投入しない。Worker が最終ゲートとして
-      // 同条件 + QR セッションを再評価するので、Scheduler 投入は必要条件にすぎない。
-      if (!isAutoExecutionEnabled() || !isUserAllowlisted(tt.userId)) continue;
+      // 開発者コード解禁フラグ (fail-closed)。未解禁ユーザーには何も投入しない。
+      // 解禁判定は web 側で開発者コードを検証して autoUnlocked を立てたもの。Worker が
+      // 最終ゲートとして同条件 + QR セッションを再評価するので、ここは必要条件にすぎない。
+      if (!autoUnlocked) continue;
       if (!tt.user.encryptedCitCreds) continue;
       if (!tt.room) continue;
 

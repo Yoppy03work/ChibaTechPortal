@@ -15,13 +15,9 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { bullmqConnection } from '../lib/redis';
 import { prisma } from '@chibatech/db';
-import {
-  isAutoExecutionEnabled,
-  isUserAllowlisted,
-  isAutoDryRun,
-} from '../lib/attendance-rollout';
 import { createAttendanceAdapter } from '../scrapers/adapter-factory';
 import {
+  isAutoDryRun,
   getMasterKey,
   withDecryptedCredentials,
   sanitizeExternalText,
@@ -459,13 +455,16 @@ async function evaluateAutoMethodGuard(
       session.timetable?.className === input.timetable.className);
 
   // pre-network: DB / 内部状態だけで判定。reject 時は adapter に触れない
+  const storedSettings = normalizeAttendanceSettings(
+    input.timetable.user.attendanceSettings
+  );
   const guardInput: AttendanceAutoGuardPreNetworkInput = {
-    // WHY: マスターキルスイッチ + allowlist (fail-closed)。どちらか不可なら auto は走らない。
-    // Scheduler でも同条件で gate するが、Worker が最終ゲートとして再評価する。
-    autoExecutionEnabled:
-      isAutoExecutionEnabled() && isUserAllowlisted(input.userId),
+    // WHY: 開発者コード解禁フラグ (fail-closed)。未解禁なら auto は走らない。解禁判定は
+    // web 側でコード検証して立てた autoUnlocked。Scheduler でも同条件で gate するが、
+    // Worker が最終ゲートとして最新の attendanceSettings を再評価する。
+    autoExecutionEnabled: storedSettings.autoUnlocked,
     method: input.method,
-    storedMode: normalizeAttendanceSettings(input.timetable.user.attendanceSettings).mode,
+    storedMode: storedSettings.mode,
     timetableUserId: input.timetable.userId,
     jobUserId: input.userId,
     timetableRoom: input.timetable.room,

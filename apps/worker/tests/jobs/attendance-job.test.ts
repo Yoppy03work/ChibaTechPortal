@@ -136,22 +136,26 @@ function timetableRow(overrides: Partial<{
         overrides.encryptedCitCreds === undefined
           ? Buffer.from('encrypted')
           : overrides.encryptedCitCreds,
+      // WHY: 既定は「未解禁 (autoUnlocked=false)」= fail-closed。gate を通したいテストは
+      // 明示的に { mode: 'auto', autoUnlocked: true } を渡す。
       attendanceSettings:
         overrides.attendanceSettings === undefined
-          ? { mode: 'auto' }
+          ? { mode: 'auto', autoUnlocked: false }
           : overrides.attendanceSettings,
     },
   };
 }
 
-const ORIGINAL_ENV = process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
+/** auto 解禁済み (開発者コード入力済み) の timetable 行。 */
+function unlockedRow(
+  overrides: Partial<{ userId: string; room: string | null; encryptedCitCreds: Buffer | null }> = {}
+) {
+  return timetableRow({ ...overrides, attendanceSettings: { mode: 'auto', autoUnlocked: true } });
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // WHY: 各テストで env を明示的にセット。デフォルトは「未設定」(= disabled) に戻す
-  delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
-  delete process.env.ATTENDANCE_AUTO_ALLOWLIST;
-  delete process.env.ATTENDANCE_AUTO_ALLOWLIST_ALL;
+  // dev-code 解禁方式では gate は attendanceSettings.autoUnlocked。dry-run 弁のみ env。
   delete process.env.ATTENDANCE_AUTO_DRY_RUN;
   // 並列 race パスを通さないために updateMany は count=0 / create は OK で固定
   attendanceLogUpdateMany.mockResolvedValue({ count: 0 });
@@ -164,14 +168,6 @@ beforeEach(() => {
 });
 
 afterAll(() => {
-  // WHY: テスト中に env を上書きしているのでスイートの最後に元の値へ戻す
-  if (ORIGINAL_ENV === undefined) {
-    delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
-  } else {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = ORIGINAL_ENV;
-  }
-  delete process.env.ATTENDANCE_AUTO_ALLOWLIST;
-  delete process.env.ATTENDANCE_AUTO_ALLOWLIST_ALL;
   delete process.env.ATTENDANCE_AUTO_DRY_RUN;
 });
 
@@ -179,8 +175,7 @@ afterAll(() => {
 // 外部アクセス禁止: adapter には到達しない
 // ============================================================
 describe('processAttendanceJob — 外部システム実アクセス禁止', () => {
-  it('env キルスイッチ未設定なら adapter.healthCheck も attend も呼ばれない', async () => {
-    delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
+  it('未解禁 (autoUnlocked=false) なら adapter.healthCheck も attend も呼ばれない', async () => {
     timetableFindUnique.mockResolvedValue(timetableRow());
     const adapter = makeAdapter();
 
@@ -190,11 +185,17 @@ describe('processAttendanceJob — 外部システム実アクセス禁止', () 
     expect(adapter.attend).not.toHaveBeenCalled();
   });
 
-  it('env キルスイッチ "true" でも allowlist 未設定 (fail-closed) なら adapter は呼ばれない', async () => {
-    // WHY: env を有効化しても allowlist が空なら誰も解禁されない (fail-closed)。
-    // healthCheck も attend も呼ばれない。
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
+  it('未解禁なら有効な QR セッションがあっても adapter は呼ばれない (fail-closed)', async () => {
+    // WHY: 開発者コード未入力 (autoUnlocked=false) の間は、セッションや時刻が揃っていても
+    // auto は走らない。healthCheck も attend も呼ばれない。
     timetableFindUnique.mockResolvedValue(timetableRow());
+    attendanceQrSessionFindUnique.mockResolvedValue({
+      id: 'qs-1',
+      userId: 'user-1',
+      roomId: '8109',
+      timetableId: 'tt-1',
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
     const adapter = makeAdapter();
 
     await processAttendanceJob({ id: 'j2', data: validJobData() }, adapter);
@@ -204,7 +205,6 @@ describe('processAttendanceJob — 外部システム実アクセス禁止', () 
   });
 
   it('storedMode が auto でなければ adapter は呼ばれない', async () => {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
     timetableFindUnique.mockResolvedValue(
       timetableRow({ attendanceSettings: { mode: 'confirm' } })
     );
@@ -216,9 +216,8 @@ describe('processAttendanceJob — 外部システム実アクセス禁止', () 
     expect(adapter.attend).not.toHaveBeenCalled();
   });
 
-  it('教室不一致なら adapter は呼ばれない', async () => {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
-    timetableFindUnique.mockResolvedValue(timetableRow({ room: '0000' }));
+  it('解禁済みでも教室不一致なら adapter は呼ばれない', async () => {
+    timetableFindUnique.mockResolvedValue(unlockedRow({ room: '0000' }));
     const adapter = makeAdapter();
 
     await processAttendanceJob({ id: 'j4', data: validJobData() }, adapter);
@@ -227,9 +226,8 @@ describe('processAttendanceJob — 外部システム実アクセス禁止', () 
     expect(adapter.attend).not.toHaveBeenCalled();
   });
 
-  it('ジョブのユーザーと時間割所有者が異なれば adapter は呼ばれない', async () => {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
-    timetableFindUnique.mockResolvedValue(timetableRow({ userId: 'attacker' }));
+  it('解禁済みでもジョブのユーザーと時間割所有者が異なれば adapter は呼ばれない', async () => {
+    timetableFindUnique.mockResolvedValue(unlockedRow({ userId: 'attacker' }));
     const adapter = makeAdapter();
 
     await processAttendanceJob({ id: 'j5', data: validJobData() }, adapter);
@@ -238,9 +236,8 @@ describe('processAttendanceJob — 外部システム実アクセス禁止', () 
     expect(adapter.attend).not.toHaveBeenCalled();
   });
 
-  it('既に成功ログがあれば adapter は呼ばれない (重複送信防止)', async () => {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
-    timetableFindUnique.mockResolvedValue(timetableRow());
+  it('解禁済みでも既に成功ログがあれば adapter は呼ばれない (重複送信防止)', async () => {
+    timetableFindUnique.mockResolvedValue(unlockedRow());
     attendanceLogFindFirst.mockResolvedValue({ id: 'log-1', status: 'success' });
     const adapter = makeAdapter();
 
@@ -251,7 +248,6 @@ describe('processAttendanceJob — 外部システム実アクセス禁止', () 
   });
 
   it('timetable が見つからなければ adapter は一切呼ばれない', async () => {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
     timetableFindUnique.mockResolvedValue(null);
     const adapter = makeAdapter();
 
@@ -280,7 +276,6 @@ describe('processAttendanceJob — 外部システム実アクセス禁止', () 
 // ============================================================
 describe('processAttendanceJob — pre-network reject 時のログ/通知', () => {
   it('pre-network reject で attendanceLog に skipped が reason 文字列付きで記録される', async () => {
-    delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
     timetableFindUnique.mockResolvedValue(timetableRow());
     const adapter = makeAdapter();
 
@@ -308,7 +303,6 @@ describe('processAttendanceJob — pre-network reject 時のログ/通知', () =
   // `NOT: { status: 'success' }` が入っていないと、唯一マッチする success 行が
   // skipped に上書きされてしまう (出席済みなのに未提出に見える)。
   it('既に同方式の success 行があるとき、skipped の updateMany は success 行を対象外にする', async () => {
-    delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
     timetableFindUnique.mockResolvedValue(timetableRow());
     // 既存の success 行を擬似的に返す → preGuard が alreadySubmitted=true で reject
     attendanceLogFindFirst.mockResolvedValue({ id: 'existing-success' });
@@ -331,7 +325,6 @@ describe('processAttendanceJob — pre-network reject 時のログ/通知', () =
 // ============================================================
 describe('processAttendanceJob — 監査ログ', () => {
   it('pre-network reject で AttendanceAuditLog に phase=skipped + reason + jobId が append される', async () => {
-    delete process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED;
     timetableFindUnique.mockResolvedValue(timetableRow());
     const adapter = makeAdapter();
 
@@ -362,7 +355,6 @@ describe('processAttendanceJob — 監査ログ', () => {
   });
 
   it('timetable 不在で AttendanceAuditLog に phase=blocked が append される', async () => {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
     timetableFindUnique.mockResolvedValue(null);
     const adapter = makeAdapter();
 
@@ -409,15 +401,11 @@ describe('processAttendanceJob — 監査ログ', () => {
 });
 
 // ============================================================
-// auto 解禁 (M2-D): enabled + allowlisted + 有効 QR セッション
+// auto 解禁 (dev-code): autoUnlocked=true + 有効 QR セッション
 // ============================================================
 const IN_WINDOW = new Date('2026-05-04T08:55:00+09:00'); // 月曜 1限(9:00) -5分
 
-describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
-  function enableAuto() {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
-    process.env.ATTENDANCE_AUTO_ALLOWLIST = 'user-1';
-  }
+describe('processAttendanceJob — auto 解禁 (dev-code)', () => {
   function validSession() {
     return {
       id: 'qs-1',
@@ -436,9 +424,8 @@ describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
     vi.useRealTimers();
   });
 
-  it('enabled + allowlisted + 有効セッション + healthy なら attend が呼ばれる', async () => {
-    enableAuto();
-    timetableFindUnique.mockResolvedValue(timetableRow());
+  it('解禁済み + 有効セッション + healthy なら attend が呼ばれる', async () => {
+    timetableFindUnique.mockResolvedValue(unlockedRow());
     attendanceQrSessionFindUnique.mockResolvedValue(validSession());
     const adapter = makeAdapter();
 
@@ -449,8 +436,7 @@ describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
   });
 
   it('QR セッション無しなら qrSessionValid=false で adapter は呼ばれない', async () => {
-    enableAuto();
-    timetableFindUnique.mockResolvedValue(timetableRow());
+    timetableFindUnique.mockResolvedValue(unlockedRow());
     attendanceQrSessionFindUnique.mockResolvedValue(null);
     const adapter = makeAdapter();
 
@@ -459,9 +445,7 @@ describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
     expect(adapter.attend).not.toHaveBeenCalled();
   });
 
-  it('allowlist 外なら adapter は呼ばれない', async () => {
-    process.env.ATTENDANCE_AUTO_EXECUTION_ENABLED = 'true';
-    process.env.ATTENDANCE_AUTO_ALLOWLIST = 'someone-else';
+  it('未解禁 (autoUnlocked=false) なら有効セッションでも adapter は呼ばれない', async () => {
     timetableFindUnique.mockResolvedValue(timetableRow());
     attendanceQrSessionFindUnique.mockResolvedValue(validSession());
     const adapter = makeAdapter();
@@ -472,8 +456,7 @@ describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
   });
 
   it('期限切れセッションなら adapter は呼ばれない', async () => {
-    enableAuto();
-    timetableFindUnique.mockResolvedValue(timetableRow());
+    timetableFindUnique.mockResolvedValue(unlockedRow());
     attendanceQrSessionFindUnique.mockResolvedValue({
       ...validSession(),
       expiresAt: new Date(Date.now() - 60 * 1000),
@@ -486,9 +469,8 @@ describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
   });
 
   it('dry-run: healthCheck は呼ぶが attend は呼ばず skipped(dry_run) を残す', async () => {
-    enableAuto();
     process.env.ATTENDANCE_AUTO_DRY_RUN = 'true';
-    timetableFindUnique.mockResolvedValue(timetableRow());
+    timetableFindUnique.mockResolvedValue(unlockedRow());
     attendanceQrSessionFindUnique.mockResolvedValue(validSession());
     const adapter = makeAdapter();
 
@@ -506,8 +488,7 @@ describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
   });
 
   it('セッションが別授業（同名でない）の timetableId に紐付いていれば adapter は呼ばれない', async () => {
-    enableAuto();
-    timetableFindUnique.mockResolvedValue(timetableRow());
+    timetableFindUnique.mockResolvedValue(unlockedRow());
     attendanceQrSessionFindUnique.mockResolvedValue({
       ...validSession(),
       timetableId: 'other-tt',
@@ -524,8 +505,7 @@ describe('processAttendanceJob — auto 解禁 (M2-D)', () => {
     // WHY: 同じ日の同名授業（連続コマ）は同じ出席QRが有効という実運用仕様。
     // 1コマ目のスキャンで作られたセッション（timetableId=1コマ目）を、
     // 2コマ目のジョブ（tt-1）でも共有できることを固定する。
-    enableAuto();
-    timetableFindUnique.mockResolvedValue(timetableRow());
+    timetableFindUnique.mockResolvedValue(unlockedRow());
     attendanceQrSessionFindUnique.mockResolvedValue({
       ...validSession(),
       timetableId: 'other-period-tt',
