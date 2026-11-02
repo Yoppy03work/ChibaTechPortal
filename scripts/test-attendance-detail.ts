@@ -8,10 +8,10 @@
  */
 
 const ATTENDANCE_URLS = [
-  'https://attendance.is.it-chiba.ac.jp/attendance/qr_again',
-  'https://attendance.is.it-chiba.ac.jp/attendance/',
-  'https://attendance.is.it-chiba.ac.jp/attendance/login',
-  'https://attendance.is.it-chiba.ac.jp/attendance/submit',
+  'https://attendance.is.chibatech.ac.jp/attendance/qr_again',
+  'https://attendance.is.chibatech.ac.jp/attendance/',
+  'https://attendance.is.chibatech.ac.jp/attendance/login',
+  'https://attendance.is.chibatech.ac.jp/attendance/submit',
 ] as const;
 
 const USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';

@@ -7,8 +7,8 @@
  * 実行: npx tsx scripts/test-attendance-classroom.ts
  */
 
-const CLASSROOM_URL = 'https://attendance.is.it-chiba.ac.jp/attendance/class_room/8109';
-const LOGIN_URL = 'https://attendance.is.it-chiba.ac.jp/attendance/login';
+const CLASSROOM_URL = 'https://attendance.is.chibatech.ac.jp/attendance/class_room/8109';
+const LOGIN_URL = 'https://attendance.is.chibatech.ac.jp/attendance/login';
 
 const USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15';
 
