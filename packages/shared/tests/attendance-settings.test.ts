@@ -9,38 +9,48 @@ import {
 } from '../src/lib/attendance-settings';
 
 describe('normalizeAttendanceSettings', () => {
-  describe('新形式 { mode } をそのまま受け入れる', () => {
+  describe('新形式 { mode } をそのまま受け入れる (autoUnlocked は既定 false)', () => {
     it.each(['manual', 'confirm', 'auto'] as const)('mode=%s', (mode) => {
-      expect(normalizeAttendanceSettings({ mode })).toEqual({ mode });
+      expect(normalizeAttendanceSettings({ mode })).toEqual({ mode, autoUnlocked: false });
     });
   });
 
-  describe('旧形式 { autoAttend } は true/false どちらもデフォルト (confirm) に倒す', () => {
+  describe('autoUnlocked の扱い (fail-closed)', () => {
+    it('mode=auto + autoUnlocked=true はそのまま解禁済みで返す', () => {
+      expect(normalizeAttendanceSettings({ mode: 'auto', autoUnlocked: true })).toEqual({
+        mode: 'auto',
+        autoUnlocked: true,
+      });
+    });
+
+    it('mode=auto + autoUnlocked 未指定は false', () => {
+      expect(normalizeAttendanceSettings({ mode: 'auto' })).toEqual({
+        mode: 'auto',
+        autoUnlocked: false,
+      });
+    });
+
+    it('mode!==auto なら autoUnlocked=true でも false に倒す (暗黙解禁させない)', () => {
+      // WHY: 壊れた行 (mode=confirm なのに autoUnlocked=true) で auto 実行が起きないよう、
+      // autoUnlocked は mode==='auto' のときだけ意味を持つ (二重の fail-closed)。
+      expect(normalizeAttendanceSettings({ mode: 'confirm', autoUnlocked: true })).toEqual({
+        mode: 'confirm',
+        autoUnlocked: false,
+      });
+      expect(normalizeAttendanceSettings({ mode: 'manual', autoUnlocked: true })).toEqual({
+        mode: 'manual',
+        autoUnlocked: false,
+      });
+    });
+  });
+
+  describe('旧形式 { autoAttend } は true/false どちらもデフォルト (confirm・未解禁) に倒す', () => {
     // WHY: 旧 boolean フラグから新 3 モード設計へ移行する際、autoAttend=true の
-    // ユーザーを暗黙的に mode='auto' へ昇格させない。auto は 6 条件ガード前提で、
-    // 旧 UI の「自動出席 ON」とはセマンティクスが異なる。安全側 (confirm) に倒し、
-    // auto を選び直したいユーザーは新 UI で明示的に選択する (現状は disabled)。
-    it('autoAttend=true → mode=デフォルト (auto に昇格させない)', () => {
-      expect(normalizeAttendanceSettings({ autoAttend: true })).toEqual({
+    // ユーザーを暗黙的に mode='auto' へ昇格させない。安全側 (confirm) に倒す。
+    it.each([true, false, null, undefined])('autoAttend=%s → デフォルト', (autoAttend) => {
+      expect(normalizeAttendanceSettings({ autoAttend })).toEqual({
         mode: DEFAULT_ATTENDANCE_MODE,
-      });
-    });
-
-    it('autoAttend=false → mode=デフォルト', () => {
-      expect(normalizeAttendanceSettings({ autoAttend: false })).toEqual({
-        mode: DEFAULT_ATTENDANCE_MODE,
-      });
-    });
-
-    it('autoAttend=null → mode=デフォルト', () => {
-      expect(normalizeAttendanceSettings({ autoAttend: null })).toEqual({
-        mode: DEFAULT_ATTENDANCE_MODE,
-      });
-    });
-
-    it('autoAttend=undefined → mode=デフォルト', () => {
-      expect(normalizeAttendanceSettings({ autoAttend: undefined })).toEqual({
-        mode: DEFAULT_ATTENDANCE_MODE,
+        autoUnlocked: false,
       });
     });
   });
@@ -49,7 +59,10 @@ describe('normalizeAttendanceSettings', () => {
     it.each([null, undefined, {}, [], 0, 'string', { mode: 'invalid' }, { mode: 123 }])(
       'input=%s',
       (raw) => {
-        expect(normalizeAttendanceSettings(raw)).toEqual({ mode: DEFAULT_ATTENDANCE_MODE });
+        expect(normalizeAttendanceSettings(raw)).toEqual({
+          mode: DEFAULT_ATTENDANCE_MODE,
+          autoUnlocked: false,
+        });
       }
     );
   });
@@ -59,15 +72,13 @@ describe('normalizeAttendanceSettings', () => {
       // WHY: 新形式に切り替わった後の DB 行に旧フィールドが残っていてもクリーンに扱う
       expect(
         normalizeAttendanceSettings({ mode: 'manual', autoAttend: true })
-      ).toEqual({ mode: 'manual' });
+      ).toEqual({ mode: 'manual', autoUnlocked: false });
     });
 
     it('mode が不正なら旧形式 autoAttend にフォールバックし、true でもデフォルトに倒す', () => {
-      // WHY: autoAttend=true 経路でも mode='auto' に暗黙昇格させないルールは、
-      // mode が不正値で fallback する場合も同じく適用する
       expect(
         normalizeAttendanceSettings({ mode: 'invalid', autoAttend: true })
-      ).toEqual({ mode: DEFAULT_ATTENDANCE_MODE });
+      ).toEqual({ mode: DEFAULT_ATTENDANCE_MODE, autoUnlocked: false });
     });
   });
 

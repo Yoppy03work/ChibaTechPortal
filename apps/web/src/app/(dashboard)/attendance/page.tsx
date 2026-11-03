@@ -7,7 +7,11 @@
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { prisma } from '@chibatech/db';
-import { normalizeAttendanceSettings, summarizeAttendance } from '@chibatech/shared';
+import {
+  normalizeAttendanceSettings,
+  summarizeAttendance,
+  isAutoDevCodeConfigured,
+} from '@chibatech/shared';
 import { AttendanceSettings } from './attendance-settings';
 import { ConfirmFlow } from './confirm-flow';
 import {
@@ -69,7 +73,11 @@ export default async function AttendancePage() {
       <h1 className="text-lg font-bold text-[#1E3A5F]">出席管理</h1>
 
       {/* 出席モード設定 */}
-      <AttendanceSettings initialMode={settings.mode} />
+      <AttendanceSettings
+        initialMode={settings.mode}
+        initialAutoUnlocked={settings.autoUnlocked}
+        autoConfigured={isAutoDevCodeConfigured()}
+      />
 
       {/* confirm モードのときだけ確認フローを表示 */}
       {settings.mode === 'confirm' && <ConfirmFlow timetables={timetables} />}
